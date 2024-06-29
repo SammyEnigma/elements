@@ -6,16 +6,11 @@
 #include <elements/app.hpp>
 #import <Cocoa/Cocoa.h>
 
-namespace cycfi { namespace elements
+namespace cycfi::elements
 {
-   app::app(
-      int         // argc
-    , char*[]     // argv
-    , std::string // name     Note: Unlike Windows and Linux, MacOS contains
-    , std::string // id             the app name and id in the plist.info file.
-                  //                We ignore the ctor params here and use those
-                  //                instead.
-   )
+   // Note: Unlike Windows and Linux, MacOS contains the app name and id in the
+   //       plist.info file. We ignore the ctor params here and use those instead.
+   app::app(std::string /*name*/)
    {
       [NSApplication sharedApplication];
       [NSApp setActivationPolicy : NSApplicationActivationPolicyRegular];
@@ -50,5 +45,5 @@ namespace cycfi { namespace elements
    {
       [NSApp terminate : nil];
    }
-}}
+}
 

@@ -7,7 +7,7 @@
 #include <elements/view.hpp>
 #include <elements/support/context.hpp>
 
-namespace cycfi { namespace elements
+namespace cycfi::elements
 {
    ////////////////////////////////////////////////////////////////////////////
    // Layer
@@ -89,29 +89,6 @@ namespace cycfi { namespace elements
       return {left, top, left+width, top+height};
    }
 
-   void layer_element::begin_focus(focus_request req)
-   {
-      focus_top(req);
-      return composite_base::begin_focus(req);
-   }
-
-   void layer_element::focus_top(focus_request req)
-   {
-      for (int ix = int(size())-1; ix >= 0; --ix)
-      {
-         auto& e = at(ix);
-         if (composite_base::focus() == &e)
-            break; // element at at(ix) is already the focus
-
-         if (e.wants_focus())
-         {
-            e.begin_focus(req);
-            composite_base::focus(ix);
-            break;
-         }
-      }
-   }
-
    ////////////////////////////////////////////////////////////////////////////
    // Deck
    ////////////////////////////////////////////////////////////////////////////
@@ -188,4 +165,4 @@ namespace cycfi { namespace elements
       if (index < size())
          _selected_index = index;
    }
-}}
+}

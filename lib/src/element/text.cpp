@@ -6,33 +6,35 @@
 #include <elements/element/text.hpp>
 #include <elements/element/port.hpp>
 #include <elements/support/theme.hpp>
+#include <elements/support/text_utils.hpp>
 #include <elements/support/context.hpp>
+#include <elements/element/traversal.hpp>
 #include <elements/view.hpp>
-#include <infra/utf8_utils.hpp>
 #include <utility>
 
-namespace cycfi { namespace elements
+namespace cycfi::elements
 {
    using namespace std::chrono_literals;
-   using text_layout = artist::text_layout;
 
    ////////////////////////////////////////////////////////////////////////////
    // Static Text Box
    ////////////////////////////////////////////////////////////////////////////
    static_text_box::static_text_box(
-      std::string_view text
-    , font_descr font_
+      std::string text
+    , font font_
     , color color_
    )
-    : _font{font_}
-    , _layout{font_, text}
-    , _color{color_}
+    : _text(std::move(text))
+    , _layout(_text.data(), _text.data() + _text.size(), font_, font_.size())
+    , _color(color_)
    {}
 
    view_limits static_text_box::limits(basic_context const& /* ctx */) const
    {
-      auto  m = _font.metrics();
-      auto  min_line_height = m.ascent + m.descent + m.leading;
+      sync();
+
+      auto  size = _layout.metrics();
+      auto  min_line_height = size.ascent + size.descent + size.leading;
       float line_height =
          (_current_size.y == -1) ?
          min_line_height :
@@ -47,17 +49,19 @@ namespace cycfi { namespace elements
 
    void static_text_box::layout(context const& ctx)
    {
-      auto  new_x = ctx.bounds.width();
-      _layout.flow(new_x);
+      sync();
 
-      auto  m = _font.metrics();
-      auto  new_y = _layout.num_lines() * (m.ascent + m.descent + m.leading);
+      _rows.clear();
+      auto  new_x = ctx.bounds.width();
+      _layout.break_lines(new_x, _rows);
+      auto  size = _layout.metrics();
+      auto  new_y = _rows.size() * (size.ascent + size.descent + size.leading);
 
       // Refresh the union of the old and new bounds if the size has changed
       if (_current_size.x != new_x || _current_size.y != new_y)
       {
          if (_current_size.x != -1 && _current_size.y != -1)
-            ctx.view.refresh(ctx, union_(ctx.bounds, rect(ctx.bounds.top_left(), extent{_current_size})));
+            ctx.view.refresh(ctx, max(ctx.bounds, rect(ctx.bounds.top_left(), extent{_current_size})));
          else
             ctx.view.refresh(ctx);
       }
@@ -70,67 +74,51 @@ namespace cycfi { namespace elements
    {
       auto& cnv = ctx.canvas;
       auto  state = cnv.new_state();
-      auto  m = _font.metrics();
-      auto  p = point{ctx.bounds.left, ctx.bounds.top + m.ascent};
+      auto  metrics = _layout.metrics();
+      auto  line_height = metrics.ascent + metrics.descent + metrics.leading;
+      auto  x = ctx.bounds.left;
+      auto  y = ctx.bounds.top + metrics.ascent;
+      auto  clip_extent = cnv.clip_extent();
 
       cnv.add_rect(ctx.bounds);
       cnv.clip();
-      _layout.draw(cnv, p, _color);
+      cnv.fill_style(_color);
+      for (auto& row : _rows)
+      {
+         if (y + metrics.descent > clip_extent.top)
+            row.draw({x, y}, cnv);
+         y += line_height;
+         if (y > ctx.bounds.bottom + metrics.ascent)
+            break;
+      }
    }
 
-   void static_text_box::set_text(std::u32string_view text)
+   void static_text_box::sync() const
    {
-      _layout.text(text);
-      _layout.flow(_current_size.x);
+      auto f = _text.data();
+      auto l = _text.data() + _text.size();
+      if (_current_size.x != -1 && (f != _layout.begin() || l != _layout.end()))
+         _layout.text(f, l);
    }
 
-   void static_text_box::set_text(std::string_view text_)
+   void static_text_box::set_text(string_view text)
    {
-      set_text(to_utf32(text_));
+      _text = std::string(text);
+      _rows.clear();
+      _layout.text(_text.data(), _text.data() + _text.size());
+      _layout.break_lines(_current_size.x, _rows);
    }
 
-   std::string static_text_box::get_utf8() const
-   {
-      return to_utf8(_layout.text());
-   }
-
-   void static_text_box::value(std::u32string_view val)
+   void static_text_box::value(string_view val)
    {
       set_text(val);
-   }
-
-   std::size_t static_text_box::insert(std::size_t pos, std::string_view text)
-   {
-      std::u32string s{get_text().data(), get_text().size()};
-      auto utf32 = to_utf32(text);
-      auto size = utf32.size();
-      s.insert(pos, std::move(utf32));
-      set_text(s);
-      return size;
-   }
-
-   std::size_t static_text_box::replace(std::size_t pos, std::size_t len, std::string_view text)
-   {
-      std::u32string s{get_text().data(), get_text().size()};
-      auto utf32 = to_utf32(text);
-      auto size = utf32.size();
-      s.replace(pos, len, std::move(utf32));
-      set_text(s);
-      return size;
-   }
-
-   void static_text_box::erase(std::size_t pos, std::size_t len)
-   {
-      std::u32string s{get_text().data(), get_text().size()};
-      s.erase(pos, len);
-      set_text(s);
    }
 
    ////////////////////////////////////////////////////////////////////////////
    // Editable Text Box
    ////////////////////////////////////////////////////////////////////////////
-   basic_text_box::basic_text_box(std::string_view text, font_descr font_)
-    : static_text_box{text, font_}
+   basic_text_box::basic_text_box(std::string text, font font_)
+    : static_text_box(std::move(text), font_)
     , _select_start{-1}
     , _select_end{-1}
     , _current_x{0}
@@ -142,35 +130,9 @@ namespace cycfi { namespace elements
     , _scroll_into_view{false}
    {}
 
-   struct basic_text_box::state_saver : std::enable_shared_from_this<basic_text_box::state_saver>
-   {
-      state_saver(basic_text_box* this_)
-       : _this(this_)
-       , save_text(this_->get_text())
-       , save_select_start(this_->_select_start)
-       , save_select_end(this_->_select_end)
-      {}
-
-      void restore()
-      {
-         if (_this)
-         {
-            _this->set_text(save_text);
-            _this->select_start(save_select_start);
-            _this->select_end(save_select_end);
-         }
-      }
-
-      basic_text_box*   _this;
-      std::u32string    save_text;
-      int               save_select_start;
-      int               save_select_end;
-   };
-
    basic_text_box::~basic_text_box()
    {
-      for (auto& ss : _state_savers)
-         ss.get()->_this = nullptr;
+      _this_handle.reset();
    }
 
    void basic_text_box::draw(context const& ctx)
@@ -206,7 +168,6 @@ namespace cycfi { namespace elements
       if (!btn.down) // released? return early
          return true;
 
-      auto _text = get_text();
       if (_text.empty())
       {
          _select_start = _select_end = 0;
@@ -214,44 +175,44 @@ namespace cycfi { namespace elements
          return true;
       }
 
-      char32_t const* begin = _text.data();
-      int _size = _text.size();
+      char const*   _first = _text.data();
+      char const*   _last = _first + _text.size();
 
-      if (char32_t const* pos = caret_position(ctx, btn.pos))
+      if (char const* pos = caret_position(ctx, btn.pos))
       {
          if (btn.num_clicks != 1)
          {
-            int end = pos - begin;
-            int start = pos - begin;
+            char const* end = pos;
+            char const* start = pos;
 
             auto fixup = [&]()
             {
-               if (start > 0)
-                  ++start;
-               _select_start = start;
-               _select_end = end;
+               if (start != _first)
+                  start = next_utf8(_last, start);
+               _select_start = int(start - _first);
+               _select_end = int(end - _first);
             };
 
             if (btn.num_clicks == 2)
             {
-               while (end < _size && !word_break(end))
-                  ++end;
-               while (start >= 0 && !word_break(start))
-                  --start;
+               while (end < _last && !word_break(end))
+                  end = next_utf8(_last, end);
+               while (start > _first && !word_break(start))
+                  start = prev_utf8(_first, start);
                fixup();
             }
             else if (btn.num_clicks == 3)
             {
-               while (end < _size && !line_break(end))
+               while (end < _last && !is_newline(uint8_t(*end)))
                   end++;
-               while (start >= 0 && !line_break(start))
+               while (start > _first && !is_newline(uint8_t(*start)))
                   start--;
                fixup();
             }
          }
          else
          {
-            auto hit = int(pos - begin);
+            auto hit = int(pos - _first);
             if ((btn.modifiers == mod_shift) && (_select_start != -1))
             {
                if (hit < _select_start)
@@ -272,8 +233,8 @@ namespace cycfi { namespace elements
 
    void basic_text_box::drag(context const& ctx, mouse_button btn)
    {
-      char32_t const* first = &get_text()[0];
-      if (char32_t const* pos = caret_position(ctx, btn.pos))
+      char const* first = &_text[0];
+      if (char const* pos = caret_position(ctx, btn.pos))
       {
          _select_end = int(pos-first);
          ctx.view.refresh(ctx);
@@ -309,6 +270,10 @@ namespace cycfi { namespace elements
       }
    }
 
+   void break_()
+   {
+   }
+
    bool basic_text_box::text(context const& ctx, text_info info_)
    {
       if (!editable())
@@ -327,34 +292,35 @@ namespace cycfi { namespace elements
       if (!_typing_state)
          _typing_state = capture_state();
 
-      bool do_replace = false;
+      bool replace = false;
       if (_select_start == _select_end)
       {
-         insert(_select_start, text);
+         _text.insert(_select_start, text);
       }
       else
       {
-         replace(_select_start, _select_end-_select_start, text);
-         do_replace = true;
+         _text.replace(_select_start, _select_end-_select_start, text);
+         replace = true;
       }
 
+      _layout.text(_text.data(), _text.data() + _text.size());
       layout(ctx);
 
-      if (do_replace)
+      if (replace)
       {
          _select_end = _select_start;
          scroll_into_view(ctx, true);
-         _select_end = _select_start += 1;
+         _select_end = _select_start += text.length();
       }
       else
       {
-         _select_end = _select_start += 1;
+         _select_end = _select_start += text.length();
          scroll_into_view(ctx, true);
       }
       return true;
    }
 
-   void basic_text_box::set_text(std::u32string_view text_)
+   void basic_text_box::set_text(string_view text_)
    {
       static_text_box::set_text(text_);
       _select_start = std::min<int>(_select_start, text_.size());
@@ -369,6 +335,7 @@ namespace cycfi { namespace elements
          )
          return false;
 
+      _show_caret = true;
       bool move_caret = false;
       bool save_x = false;
       bool handled = false;
@@ -376,18 +343,17 @@ namespace cycfi { namespace elements
       int start = std::min(_select_end, _select_start);
       int end = std::max(_select_end, _select_start);
       std::function<void()> undo_f = capture_state();
-      auto _text = get_text();
 
-      auto up_down = [this, &ctx, k, &move_caret, &_text]()
+      auto up_down = [this, &ctx, k, &move_caret]()
       {
          bool up = k.key == key_code::up;
-         caret_metrics info;
-         info = caret_info(ctx, &_text[_select_end]);
+         glyph_metrics info;
+         info = glyph_info(ctx, &_text[_select_end]);
          if (info.str)
          {
             auto y = up ? -info.line_height : +info.line_height;
             auto pos = point{ctx.bounds.left + _current_x, info.pos.y + y};
-            char32_t const* cp = caret_position(ctx, pos);
+            char const* cp = caret_position(ctx, pos);
             if (cp)
                _select_end = int(cp - &_text[0]);
             else
@@ -396,29 +362,37 @@ namespace cycfi { namespace elements
          }
       };
 
-      auto next_char = [this, &_text]()
+      auto next_char = [this]()
       {
-         if (_text.size() > 1 && _select_end < static_cast<int>(_text.size()))
-            ++_select_end;
+         if (_select_end < static_cast<int>(_text.size()))
+         {
+            char const* end = _text.data() + _text.size();
+            char const* p = next_utf8(end, &_text[_select_end]);
+            _select_end = int(p - &_text[0]);
+         }
       };
 
       auto prev_char = [this]()
       {
          if (_select_end > 0)
-            --_select_end;
+         {
+            char const* start = &_text[0];
+            char const* p = prev_utf8(start, &_text[_select_end]);
+            _select_end = int(p - &_text[0]);
+         }
       };
 
-      auto next_word = [this, &_text]()
+      auto next_word = [this]()
       {
          if (_select_end < static_cast<int>(_text.size()))
          {
-            int pos = _select_end;
-            int size = _text.size();
-            while (pos != size && word_break(pos))
-               ++pos;
-            while (pos != size && !word_break(pos))
-               ++pos;
-            _select_end = pos;
+            char const* p = &_text[_select_end];
+            char const* end = _text.data() + _text.size();
+            while (p != end && word_break(p))
+               p = next_utf8(end, p);
+            while (p != end && !word_break(p))
+               p = next_utf8(end, p);
+            _select_end = int(p - &_text[0]);
          }
       };
 
@@ -426,14 +400,18 @@ namespace cycfi { namespace elements
       {
          if (_select_end > 0)
          {
-            int pos = _select_end-1;
-            while (pos != 0 && word_break(pos))
-               --pos;
-            while (pos != 0 && !word_break(pos))
-               --pos;
-            if (pos != 0)
-               ++pos;
-            _select_end = pos;
+            char const* start = &_text[0];
+            char const* p = prev_utf8(start, &_text[_select_end]);
+            while (p != start && word_break(p))
+               p = prev_utf8(start, p);
+            while (p != start && !word_break(p))
+               p = prev_utf8(start, p);
+            if (p != start)
+            {
+               char const* end = _text.data() + _text.size();
+               p = next_utf8(end, p);
+            }
+            _select_end = int(p - &_text[0]);
          }
       };
 
@@ -450,7 +428,7 @@ namespace cycfi { namespace elements
             case key_code::enter:
                if (editable())
                {
-                  replace(start, end-start, "\n");
+                  _text.replace(start, end-start, "\n");
                   _select_start += 1;
                   _select_end = _select_start;
                   save_x = true;
@@ -506,6 +484,20 @@ namespace cycfi { namespace elements
                   up_down();
                handled = true;
                break;
+
+            case key_code::home:
+               {
+                  this->home(k.modifiers & mod_shift);
+                  ctx.view.refresh(ctx);
+                  return true;
+               }
+
+            case key_code::end:
+               {
+                  this->end(k.modifiers & mod_shift);
+                  ctx.view.refresh(ctx);
+                  return true;
+               }
 
             case key_code::a:
                if (k.modifiers & mod_action)
@@ -575,6 +567,7 @@ namespace cycfi { namespace elements
       }
       else if (handled)
       {
+         _layout.text(_text.data(), _text.data() + _text.size());
          layout(ctx);
          auto bounds = ctx.bounds;
          auto size = current_size();
@@ -595,20 +588,26 @@ namespace cycfi { namespace elements
 
    void basic_text_box::draw_caret(context const& ctx)
    {
+      // Make sure _this_handle is initialized to this
+      if (!_this_handle)
+         _this_handle = std::make_shared<basic_text_box*>(this);
+
       if (!editable() || _select_start == -1)
+         return;
+
+      if (!_is_focus) //No caret if not focused
          return;
 
       auto& canvas = ctx.canvas;
       auto const& theme = get_theme();
       rect caret_bounds;
       bool has_caret = false;
-      auto _text = get_text();
 
       // Handle the case where text is empty
-      if (_is_focus && _text.empty())
+      if (_text.empty())
       {
-         auto  m = get_font().metrics();
-         auto  line_height = m.ascent + m.descent + m.leading;
+         auto  size = _layout.metrics();
+         auto  line_height = size.ascent + size.descent + size.leading;
          auto  width = theme.text_box_caret_width;
          auto  left = ctx.bounds.left;
          auto  top = ctx.bounds.top;
@@ -626,11 +625,11 @@ namespace cycfi { namespace elements
          caret_bounds = rect{left, top, left+width, top + line_height};
       }
       // Draw the caret
-      else if (_is_focus && (_select_start != -1) && (_select_start == _select_end))
+      else if (_select_start == _select_end)
       {
-         auto  start_info = caret_info(ctx, _text.data() + _select_start);
+         auto  start_info = glyph_info(ctx, _text.data() + _select_start);
          auto width = theme.text_box_caret_width;
-         rect& caret = start_info.caret;
+         rect& caret = start_info.bounds;
 
          if (_show_caret)
          {
@@ -642,10 +641,10 @@ namespace cycfi { namespace elements
          }
 
          has_caret = true;
-         caret_bounds = rect{caret.left, caret.top, caret.left+width, caret.bottom};
+         caret_bounds = rect{caret.left - 0.5f, caret.top, caret.left + width + 0.5f, caret.bottom};
       }
 
-      if (_is_focus && has_caret && !_caret_started)
+      if (has_caret && !_caret_started)
       {
          // We convert the caret bounds to device coordinates and expand it by 2 pixels
          // on all sides for good measure.
@@ -654,12 +653,16 @@ namespace cycfi { namespace elements
          caret_bounds = {tl.x-2, tl.y-2, br.x+2, br.y+2};
 
          _caret_started = true;
+         this_weak_handle wp = _this_handle;
          ctx.view.post(500ms,
-            [this, &_view = ctx.view, caret_bounds]()
+            [wp, &_view = ctx.view, caret_bounds]()
             {
-               _show_caret = !_show_caret;
-               _view.refresh(caret_bounds);
-               _caret_started = false;
+               if (auto p = wp.lock())
+               {
+                  (*p)->_show_caret = !(*p)->_show_caret;
+                  _view.refresh(caret_bounds);
+                  (*p)->_caret_started = false;
+               }
             }
          );
       }
@@ -672,16 +675,15 @@ namespace cycfi { namespace elements
 
       auto& canvas = ctx.canvas;
       auto const& theme = get_theme();
-      auto _text = get_text();
 
       if (!_text.empty())
       {
-         auto  start_info = caret_info(ctx, _text.data() + _select_start);
-         rect& r1 = start_info.caret;
+         auto  start_info = glyph_info(ctx, _text.data() + _select_start);
+         rect& r1 = start_info.bounds;
          r1.right = ctx.bounds.right;
 
-         auto  end_info = caret_info(ctx, _text.data() + _select_end);
-         rect& r2 = end_info.caret;
+         auto  end_info = glyph_info(ctx, _text.data() + _select_end);
+         rect& r2 = end_info.bounds;
          r2.right = r2.left;
          r2.left = ctx.bounds.left;
 
@@ -710,52 +712,143 @@ namespace cycfi { namespace elements
       }
    }
 
-   char32_t const* basic_text_box::caret_position(context const& ctx, point p)
+   char const* basic_text_box::caret_position(context const& ctx, point p)
    {
-      auto  m = get_font().metrics();
       auto  x = ctx.bounds.left;
-      auto  y = ctx.bounds.top + m.ascent;
+      auto  y = ctx.bounds.top;
+      auto  metrics = _layout.metrics();
+      auto  line_height = metrics.ascent + metrics.descent + metrics.leading;
 
-      auto  index = get_layout().caret_index(p.x-x, p.y-y); // relative to top-left
-      if (index != get_layout().npos)
-         return get_text().data() + index;
-      return nullptr;
+      char const* found = nullptr;
+      for (auto& row : _rows)
+      {
+         // Check if p is within this row
+         if ((p.y >= y) && (p.y < y + line_height))
+         {
+            // Check if we are at the very start of the row or beyond
+            if (p.x <= x)
+            {
+               found = row.begin();
+               break;
+            }
+
+            // Get the actual coordinates of the glyph
+            row.for_each(
+               [p, x, &found](char const* utf8, float left, float right)
+               {
+                  if ((p.x >= (x + left)) && (p.x < (x + right)))
+                  {
+                     found = utf8;
+                     return false;
+                  }
+                  return true;
+               }
+            );
+            // Assume it's at the end of the row if we haven't found a hit
+            if (!found)
+               found = row.end();
+            break;
+         }
+         y += line_height;
+      }
+      return found;
    }
 
-   basic_text_box::caret_metrics basic_text_box::caret_info(context const& ctx, char32_t const* s)
+   basic_text_box::glyph_metrics basic_text_box::glyph_info(context const& ctx, char const* s)
    {
-      auto  m = get_font().metrics();
+      auto  metrics = _layout.metrics();
       auto  x = ctx.bounds.left;
-      auto  y = ctx.bounds.top + m.ascent;
-      auto  pos = get_layout().caret_point(s - &get_text()[0]);
+      auto  y = ctx.bounds.top + metrics.ascent;
+      auto  descent = metrics.descent;
+      auto  ascent = metrics.ascent;
+      auto  leading = metrics.leading;
+      auto  line_height = ascent + descent + leading;
 
-      pos.x += x;
-      pos.y += y;
-      caret_metrics info;
-      info.str = s;
-      info.pos = pos;
-      info.caret = {pos.x, pos.y - (m.leading + m.ascent), pos.x + 1, pos.y + m.descent};
-      info.line_height = m.leading + m.ascent + m.descent;
+      glyph_metrics info;
+      info.str = nullptr;
+      info.line_height = line_height;
+
+      // Check if s is at the very end
+      if (s == _text.data() + _text.size())
+      {
+         auto const& last_row = _rows.back();
+         auto        rightmost = x + last_row.width();
+         auto        bottom_y = y + (line_height * (_rows.size() - 1));
+
+         info.pos = {rightmost, bottom_y};
+         info.bounds = {rightmost, bottom_y - ascent, rightmost + 10, bottom_y + descent};
+         info.str = s;
+         return info;
+      }
+
+      glyphs*  prev_row = nullptr;
+      for (auto& row : _rows)
+      {
+         // Check if s is within this row
+         if (s >= row.begin() && s < row.end())
+         {
+            // Get the actual coordinates of the glyph
+            row.for_each(
+               [s, &info, x, y, ascent, descent](char const* utf8, float left, float right)
+               {
+                  if (utf8 >= s)
+                  {
+                     info.pos = {x + left, y};
+                     info.bounds = {x + left, y - ascent, x + right, y + descent};
+                     info.str = utf8;
+                     return false;
+                  }
+                  return true;
+               }
+            );
+            break;
+         }
+         // This handles the case where s is in between the start of the
+         // current row and the end of the previous.
+         else if (s < row.begin() && prev_row)
+         {
+            auto  rightmost = x + prev_row->width();
+            auto  prev_y = y - line_height;
+            info.pos = {rightmost, prev_y};
+            info.bounds = {rightmost, prev_y - ascent, rightmost + 10, prev_y + descent};
+            info.str = s;
+            break;
+         }
+         y += line_height;
+         prev_row = &row;
+      }
+
       return info;
    }
 
    void basic_text_box::delete_(bool forward)
    {
       auto  start = std::min(_select_end, _select_start);
-
+      auto  end = std::max(_select_end, _select_start);
       if (start != -1)
       {
-         auto end = std::max(_select_end, _select_start);
          if (start == end)
          {
             if (forward)
-               erase(start, 1);
+            {
+               char const* start_p = &_text[start];
+               char const* end_p = &_text[0] + _text.size();
+               char const* p = next_utf8(end_p, start_p);
+               start = int(start_p - &_text[0]);
+               _text.erase(start, p - start_p);
+            }
             else if (start > 0)
-               erase(--start, 1);
+            {
+               char const* start_p = &_text[0];
+               char const* end_p = &_text[start];
+               char const* p = prev_utf8(start_p, end_p);
+               start = int(p - &_text[0]);
+               _text.erase(start, end_p - p);
+            }
          }
          else
          {
-            erase(start, end-start);
+            _text.erase(start, end-start);
          }
          _select_end = _select_start = start;
       }
@@ -767,7 +860,7 @@ namespace cycfi { namespace elements
       {
          auto  end_ = std::max(start, end);
          auto  start_ = std::min(start, end);
-         clipboard(to_utf8(get_text().substr(start, end_-start_)));
+         clipboard(_text.substr(start, end_-start_));
          delete_(false);
       }
    }
@@ -778,7 +871,7 @@ namespace cycfi { namespace elements
       {
          auto  end_ = std::max(start, end);
          auto  start_ = std::min(start, end);
-         clipboard(to_utf8(get_text().substr(start, end_-start_)));
+         clipboard(_text.substr(start, end_-start_));
       }
    }
 
@@ -789,36 +882,48 @@ namespace cycfi { namespace elements
          auto  end_ = std::max(start, end);
          auto  start_ = std::min(start, end);
          std::string ins = clipboard();
-         start += replace(start, end_-start_, ins);
+         _text.replace(start, end_-start_, ins);
+         start += ins.size();
          _select_end = _select_start = start;
       }
    }
 
+   struct basic_text_box::state_saver
+   {
+      state_saver(basic_text_box* this_)
+       : text(this_->_text)
+       , select_start(this_->_select_start)
+       , select_end(this_->_select_end)
+       , save_text(this_->_text)
+       , save_select_start(this_->_select_start)
+       , save_select_end(this_->_select_end)
+      {}
+
+      void operator()()
+      {
+         text = save_text;
+         select_start = save_select_start;
+         select_end = save_select_end;
+      }
+
+      std::string&   text;
+      int&           select_start;
+      int&           select_end;
+
+      std::string    save_text;
+      int            save_select_start;
+      int            save_select_end;
+   };
+
    std::function<void()>
    basic_text_box::capture_state()
    {
-      // garbage collect
-      for (auto i = _state_savers.begin(); i != _state_savers.end(); )
-      {
-         if (i->use_count() == 1)
-            i = _state_savers.erase(i);
-         else
-            ++i;
-      }
-
-      auto saver_ptr = std::make_shared<state_saver>(this);
-      _state_savers.insert(saver_ptr);
-      return
-         [saver_ptr]()
-         {
-            if (saver_ptr.use_count() > 1)
-               saver_ptr->restore();
-         };
+      return state_saver(this);
    }
 
    void basic_text_box::scroll_into_view(context const& ctx, bool save_x)
    {
-      if (get_text().empty())
+      if (_text.empty())
       {
          auto caret = rect{
             ctx.bounds.left-1,
@@ -836,19 +941,14 @@ namespace cycfi { namespace elements
       if (_select_end == -1)
          return;
 
-      basic_text_box::caret_metrics info;
-      if (_select_end >= int(get_text().size()))
-         info = caret_info(ctx, U"");
-      else
-         info = caret_info(ctx, &get_text()[_select_end]);
-
+      auto info = glyph_info(ctx, &_text[_select_end]);
       if (info.str)
       {
          auto caret = rect{
-            info.caret.left-1,
-            info.caret.top,
-            info.caret.left+1,
-            info.caret.bottom
+            info.bounds.left-1,
+            info.bounds.top,
+            info.bounds.left+1,
+            info.bounds.bottom
          };
          if (!scrollable::find(ctx).scroll_into_view(caret))
             ctx.view.refresh(ctx);
@@ -865,32 +965,35 @@ namespace cycfi { namespace elements
 
    void basic_text_box::begin_focus(focus_request /*req*/)
    {
-     _is_focus = true;
+      _is_focus = true;
+      _show_caret = true;
       if (_select_start == -1)
          _select_start = _select_end = 0;
+      scroll_into_view();
    }
 
-   void basic_text_box::end_focus()
+   bool basic_text_box::end_focus()
    {
       _is_focus = false;
+      return true;
    }
 
    void basic_text_box::select_start(int pos)
    {
-      if (pos == -1 || (pos >= 0 && pos <= static_cast<int>(get_text().size())))
+      if (pos == -1 || (pos >= 0 && pos <= static_cast<int>(_text.size())))
          _select_start = pos;
    }
 
    void basic_text_box::select_end(int pos)
    {
-      if (pos == -1 || (pos >= 0 && pos <= static_cast<int>(get_text().size())))
+      if (pos == -1 || (pos >= 0 && pos <= static_cast<int>(_text.size())))
          _select_end = pos;
    }
 
    void basic_text_box::select_all()
    {
       _select_start = 0;
-      _select_end = static_cast<int>(get_text().size());
+      _select_end = int(_text.size());
    }
 
    void basic_text_box::select_none()
@@ -898,29 +1001,41 @@ namespace cycfi { namespace elements
       _select_start = _select_end = -1;
    }
 
-   void basic_text_box::home()
+   void basic_text_box::home(bool shift)
    {
+      auto sel_start = select_start();
+      auto sel_end = select_end();
+      if (shift && (sel_start != -1) && (sel_end != -1))
+         select_end(std::max(sel_start, sel_end));
+      else
+         select_end(0);
       select_start(0);
-      select_end(0);
       scroll_into_view();
    }
 
-   void basic_text_box::end()
+   void basic_text_box::end(bool shift)
    {
-      auto end = get_text().size();
-      select_start(end);
+      auto end = static_cast<int>(get_text().size());
+      auto sel_start = select_start();
+      auto sel_end = select_end();
+      if (shift && (sel_start != -1) && (sel_end != -1))
+         select_start(std::min(sel_start, sel_end));
+      else
+         select_start(end);
       select_end(end);
       scroll_into_view();
    }
 
-   bool basic_text_box::word_break(int index) const
+   bool basic_text_box::word_break(char const* utf8) const
    {
-      return get_layout().word_break(index) == text_layout::allow_break || line_break(index);
+      auto cp = codepoint(utf8);
+      return is_space(cp) || is_punctuation(cp);
    }
 
-   bool basic_text_box::line_break(int index) const
+   bool basic_text_box::line_break(char const* utf8) const
    {
-      return index == 0 || get_layout().line_break(index) == text_layout::must_break;
+      auto cp = codepoint(utf8);
+      return is_newline(cp);
    }
 
    ////////////////////////////////////////////////////////////////////////////
@@ -928,13 +1043,15 @@ namespace cycfi { namespace elements
    ////////////////////////////////////////////////////////////////////////////
    view_limits basic_input_box::limits(basic_context const& /* ctx */) const
    {
-      auto  m = get_font().metrics();
-      auto  line_height = m.ascent + m.descent + m.leading;
-      return {{32, line_height}, {full_extent, line_height}};
+      auto  size = _layout.metrics();
+      auto  line_height = size.ascent + size.descent + size.leading;
+      return {{1000000, line_height}, {full_extent, line_height}};
    }
 
    void basic_input_box::draw(context const& ctx)
    {
+      make_maximally_visible(ctx); // Make the input box maximally visible
+
       if (get_text().empty())
       {
          if (!_placeholder.empty())
@@ -943,29 +1060,39 @@ namespace cycfi { namespace elements
 
             auto& canvas = ctx.canvas;
             auto& theme = get_theme();
-            auto  m = get_font().metrics();
+            auto  size = _layout.metrics();
 
             canvas.text_align(canvas::left);
-            canvas.font(theme.text_box_font);
+            canvas.font(theme.text_box_font, theme.text_box_font._size);
             canvas.fill_style(theme.inactive_font_color);
             canvas.fill_text(
                _placeholder.c_str()
-             , {ctx.bounds.left, ctx.bounds.top + m.ascent}
+             , {ctx.bounds.left, ctx.bounds.top + size.ascent}
             );
          }
          draw_caret(ctx);
       }
       else
       {
-         basic_text_box::draw(ctx);
+         if (!ctx.enabled)
+         {
+            auto c = get_color();
+            set_color(c.opacity(0.5));
+            basic_text_box::draw(ctx);
+            set_color(c);
+         }
+         else
+         {
+            basic_text_box::draw(ctx);
+         }
       }
    }
 
    bool basic_input_box::text(context const& ctx, text_info info)
    {
       bool r = basic_text_box::text(ctx, info);
-      if (on_text)
-         on_text(to_utf8(get_text()));
+      if (r && on_text)
+         on_text(get_text());
       return r;
    }
 
@@ -976,10 +1103,24 @@ namespace cycfi { namespace elements
          switch (k.key)
          {
             case key_code::enter:
+            case key_code::kp_enter:
+            {
+               bool yield = true;
                if (on_enter)
-                  on_enter(to_utf8(get_text()));
+                  yield = on_enter(get_text());
+               if (yield)
+               {
+                  relinquish_focus(ctx);
+                  ctx.view.refresh(ctx);
+               }
+               return true;
+            }
+
+            case key_code::escape:
+               if (on_escape)
+                  on_escape();
+               relinquish_focus(ctx);
                ctx.view.refresh(ctx);
-               ctx.view.end_focus();
                return true;
 
             case key_code::up:
@@ -987,32 +1128,22 @@ namespace cycfi { namespace elements
             case key_code::tab:
                return false;
 
-            case key_code::home:
+            case key_code::left:
+               if (k.modifiers & mod_action)
                {
-                  auto sel_start = select_start();
-                  auto sel_end = select_end();
-                  if ((k.modifiers & mod_shift) && (sel_start != -1) && (sel_end != -1))
-                     select_end(std::max(sel_start, sel_end));
-                  else
-                     select_end(0);
-                  select_start(0);
-                  scroll_into_view(ctx, false);
+                  this->home(k.modifiers & mod_shift);
+                  ctx.view.refresh(ctx);
                   return true;
                }
-
-            case key_code::end:
+               break;
+            case key_code::right:
+               if (k.modifiers & mod_action)
                {
-                  auto end = static_cast<int>(get_text().size());
-                  auto sel_start = select_start();
-                  auto sel_end = select_end();
-                  if ((k.modifiers & mod_shift) && (sel_start != -1) && (sel_end != -1))
-                     select_start(std::min(sel_start, sel_end));
-                  else
-                     select_start(end);
-                  select_end(end);
-                  scroll_into_view(ctx, false);
+                  this->end(k.modifiers & mod_shift);
+                  ctx.view.refresh(ctx);
                   return true;
                }
+               break;
 
             default:
                break;
@@ -1047,12 +1178,13 @@ namespace cycfi { namespace elements
             ins += *p;
          }
 
-         start_ += replace(start_, end_-start_, ins);
+         _text.replace(start_, end_-start_, ins);
+         start_ += ins.size();
          select_start(start_);
          select_end(start_);
 
          if (on_text)
-            on_text(to_utf8(get_text()));
+            on_text(_text);
       }
    }
 
@@ -1060,35 +1192,163 @@ namespace cycfi { namespace elements
    {
       basic_text_box::delete_(forward);
       if (on_text)
-         on_text(to_utf8(get_text()));
+         on_text(_text);
    }
 
    bool basic_input_box::click(context const& ctx, mouse_button btn)
    {
       if (btn.state != mouse_button::left)
          return false;
-
-      if (_first_focus && select_start() != select_end())
-      {
-         _first_focus = false;
-         return true;
-      }
-      _first_focus = false;
-
       return basic_text_box::click(ctx, btn);
    }
 
-   void basic_input_box::begin_focus(focus_request req)
+   bool basic_input_box::scroll(context const& ctx, point dir, point p)
    {
-      _first_focus = true;
-      basic_text_box::begin_focus(req);
+      bool r = basic_text_box::scroll(ctx, dir, p);
+      if (get_text().empty())
+         return r;
+
+      limit_scroll_right(ctx);
+      return r;
    }
 
-   void basic_input_box::end_focus()
+   bool basic_input_box::cursor(context const& ctx, point p, cursor_tracking status)
    {
-      _first_focus = false;
-         if (on_end_focus)
-            on_end_focus(to_utf8(get_text()));
-      basic_text_box::end_focus();
+      _is_hovering = status != cursor_tracking::leaving;
+      return basic_text_box::cursor(ctx, p, status);
    }
-}}
+
+   bool basic_input_box::end_focus()
+   {
+      if (!is_enabled())
+         return basic_text_box::end_focus();
+
+      bool yield = true;
+      if (on_end_focus)
+         yield = on_end_focus(get_text());
+      if (yield)
+         return basic_text_box::end_focus();
+      return false;
+   }
+
+   /**
+    * \brief
+    *    Adjusts the visibility of the basic_input_box's text within its
+    *    context to maximize its visibility.
+    *
+    *    This member function adjusts the position of the basic_input_box's
+    *    text within its containing port to maximize its visibility. This
+    *    procedire might involve scrolling or repositioning within the port.
+    *
+    *    The positioning strategy is determined by the `_clip_action` member.
+    *    If `_clip_action` is set to `clip_left`, the function will attempt
+    *    to position the text such that the rightmost text is visible. If
+    *    `_clip_action` is set to `clip_right` (the default), the function
+    *    will attempt to position the text such that the leftmost text is
+    *    visible.
+    *
+    * \param ctx
+    *    This provides information about the environment in which the
+    *    basic_input_box is being used, such as the current view, canvas, and
+    *    other settings, as well as the element's bounds.
+    */
+   void basic_input_box::make_maximally_visible(context const& ctx)
+   {
+      if (get_text().empty())
+         return;
+
+      if (_clip_action == clip_none || _is_hovering ||
+         select_start() != select_end() || is_focus())
+      {
+         limit_scroll_right(ctx);
+         return;
+      }
+
+      if (auto* pctx = find_parent_context<port_base*>(ctx))
+      {
+         auto const& _text = get_text();
+         auto last = _text.size();
+         auto text_right = glyph_info(ctx, &_text[last]).bounds.left + 1.0f;
+         auto port_width = pctx->bounds.width();
+         auto extent = ctx.bounds.width();
+         auto ext_left = ctx.bounds.left;
+         auto ext_right = ctx.bounds.right;
+
+         // Initial window position based on text block visibility
+         float desired_left, desired_right;
+
+         if (_clip_action == clip_left)
+         {
+            auto text_left = text_right - port_width;
+            desired_left = std::max(ext_left, text_left);
+            desired_right = desired_left + port_width;
+         }
+         else // _clip_action == clip_right
+         {
+            desired_right = std::min(ext_left + port_width, text_right);
+            desired_left = desired_right - port_width;
+         }
+
+         // Adjust window if exceeding bounds
+         if (desired_right > ext_right)
+         {
+            desired_right = ext_right;
+            desired_left = ext_right - port_width;
+         }
+         if (desired_left < ext_left)
+         {
+            desired_left = ext_left;
+            desired_right = ext_left + port_width;
+         }
+
+         // Calculate the alignment value
+         auto align = (desired_left - ext_left) / (extent - port_width);
+
+         auto port = dynamic_cast<port_base*>(pctx->element);
+         if (port && port->halign() != align)
+         {
+            port->halign(align);
+            ctx.view.refresh(*pctx);
+         }
+      }
+   }
+
+   /**
+    * \brief
+    *    Limits the scrolling of the basic_input_box's text to the right edge
+    *    of the text width.
+    *
+    *    This function clamps the horizontal alignment of the port to ensure
+    *    that it does not scroll beyond the right edge of the text.
+    *
+    * \param ctx
+    *    Provides context about the environment where the basic_input_box is
+    *    used. This includes the current view, canvas, other settings, and
+    *    the element's bounds.
+    */
+   void basic_input_box::limit_scroll_right(context const& ctx)
+   {
+      if (get_text().empty())
+         return;
+
+      if (auto* pctx = find_parent_context<port_base*>(ctx))
+      {
+         auto last = _text.size();
+         auto text_right = glyph_info(ctx, &_text[last]).bounds.left + 1.0f;
+         auto port_width = pctx->bounds.width();
+         auto extent = ctx.bounds.width();
+         auto ext_left = ctx.bounds.left;
+
+         auto text_left = text_right - port_width;
+         auto adjusted_left = std::max(text_left, ext_left);
+         auto align = (adjusted_left - ext_left) / (extent - port_width);
+
+         auto port = dynamic_cast<port_base*>(pctx->element);
+         if (port && port->halign() > align)
+         {
+            port->halign(align);
+            ctx.view.refresh(*pctx);
+         }
+      }
+   }
+}

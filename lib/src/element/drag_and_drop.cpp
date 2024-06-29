@@ -1,5 +1,5 @@
 /*=============================================================================
-   Copyright (c) 2016-2020 Joel de Guzman
+   Copyright (c) 2016-2023 Joel de Guzman
 
    Distributed under the MIT License [ https://opensource.org/licenses/MIT ]
 =============================================================================*/
@@ -11,13 +11,13 @@
 #include <elements/support/theme.hpp>
 #include <elements/view.hpp>
 
-namespace cycfi { namespace elements
+namespace cycfi::elements
 {
-   drop_base::drop_base(std::initializer_list<std::string> mime_types_)
+   drop_receiver::drop_receiver(std::initializer_list<std::string> mime_types_)
     : _mime_types{mime_types_}
    {}
 
-   bool drop_base::wants_control() const
+   bool drop_receiver::wants_control() const
    {
       return true;
    }
@@ -30,7 +30,7 @@ namespace cycfi { namespace elements
       }
    }
 
-   void drop_base::prepare_subject(context& ctx)
+   void drop_receiver::prepare_subject(context& ctx)
    {
       proxy_base::prepare_subject(ctx);
       std::string id = address_to_string(this);
@@ -38,7 +38,7 @@ namespace cycfi { namespace elements
          _mime_types.insert(id);
    }
 
-   void drop_base::track_drop(context const& ctx, drop_info const& info, cursor_tracking status)
+   void drop_receiver::track_drop(context const& ctx, drop_info const& info, cursor_tracking status)
    {
       // Return early if none of registered mime types is in the `drop_info`
       if (!std::any_of(_mime_types.begin(), _mime_types.end(),
@@ -56,31 +56,38 @@ namespace cycfi { namespace elements
       }
    }
 
-   bool drop_base::drop(context const& /*ctx*/, drop_info const& /*info*/)
+   bool drop_receiver::drop(context const& /*ctx*/, drop_info const& /*info*/)
    {
       _is_tracking = false;
       return false;
    }
 
-   drop_box_base::drop_box_base(std::initializer_list<std::string> mime_types_)
+   drop_box_element::drop_box_element(std::initializer_list<std::string> mime_types_)
     : base_type{mime_types_}
    {}
 
-   void drop_box_base::draw(context const& ctx)
+   void drop_box_element::draw(context const& ctx)
    {
       proxy_base::draw(ctx);
       if (is_tracking())
       {
          auto& cnv = ctx.canvas;
+
          auto& bounds = ctx.bounds;
-         cnv.stroke_style(get_theme().indicator_hilite_color.opacity(0.5));
-         cnv.line_width(2.0);
-         cnv.add_rect(bounds);
+         auto lw = 3 / ctx.view.scale();
+         cnv.stroke_style(get_theme().indicator_color);
+         cnv.line_width(lw);
+         cnv.add_rect(bounds.inset(lw/2));
          cnv.stroke();
       }
    }
 
-   bool drop_box_base::drop(context const& ctx, drop_info const& info)
+   element* drop_box_element::hit_test(context const& ctx, point p, bool leaf, bool /*control*/)
+   {
+      return proxy_base::hit_test(ctx, p, leaf, false); // accept non-control subjects
+   }
+
+   bool drop_box_element::drop(context const& ctx, drop_info const& info)
    {
       base_type::drop(ctx, info);
       bool r = on_drop(info);
@@ -101,34 +108,45 @@ namespace cycfi { namespace elements
          {
             in_context_do(ctx, *c, [&](context const& cctx)
             {
+               auto draw_insertion_line =
+                  [&cctx](float left, float right, float pos)
+                  {
+                     auto &cnv = cctx.canvas;
+                     cnv.stroke_style(get_theme().indicator_color);
+                     cnv.line_width(2.0);
+                     cnv.move_to({left, pos});
+                     cnv.line_to({right, pos});
+                     cnv.stroke();
+                  };
+
                point cursor_pos = ctx.cursor_pos();
                if (c->size())
                {
                   auto hit_info = c->hit_element(cctx, cursor_pos, false);
+                  rect bounds;
+                  float pos;
                   if (hit_info.element_ptr)
                   {
-                     rect const& bounds = hit_info.bounds;
+                     bounds = hit_info.bounds;
                      bool before = cursor_pos.y < (bounds.top + (bounds.height()/2));
-                     float pos = before? bounds.top : bounds.bottom;
+                     pos = before? bounds.top : bounds.bottom;
                      _insertion_pos = before? hit_info.index : hit_info.index+1;
-
-                     auto &cnv = cctx.canvas;
-                     cnv.stroke_style(get_theme().indicator_hilite_color.opacity(0.5));
-                     cnv.line_width(2.0);
-                     cnv.move_to({bounds.left, pos});
-                     cnv.line_to({bounds.right, pos});
-                     cnv.stroke();
                   }
+                  else
+                  {
+                     auto top_bounds = c->bounds_of(cctx, 0);
+                     auto bottom_bounds = c->bounds_of(cctx, c->size()-1);
+                     bounds = cctx.bounds;
+                     bool before = cursor_pos.y < top_bounds.top;
+                     pos = before? top_bounds.top : bottom_bounds.bottom;
+                     _insertion_pos = before? 0 : c->size();
+                  }
+                  draw_insertion_line(bounds.left, bounds.right, pos);
                }
                else
                {
                   _insertion_pos = 0;
-                  auto &cnv = cctx.canvas;
-                  cnv.stroke_style(get_theme().indicator_hilite_color.opacity(0.5));
-                  cnv.line_width(2.0);
-                  cnv.move_to({cctx.bounds.left, cctx.bounds.top});
-                  cnv.line_to({cctx.bounds.right, cctx.bounds.top});
-                  cnv.stroke();
+                  draw_insertion_line(cctx.bounds.left, cctx.bounds.right, cctx.bounds.top);
                }
             });
          }
@@ -163,15 +181,15 @@ namespace cycfi { namespace elements
    bool drop_inserter_element::click(context const& ctx, mouse_button btn)
    {
       bool r = base_type::click(ctx, btn);
-      if (!r || btn.down)
-         return r;
-
-      if (auto s = find_subject<selection_list_element*>(this))
+      if (r && btn.down)
       {
-         std::vector<std::size_t> indices = s->get_selection();
-         int latest = s->get_select_end();
-         if (latest >= 0)
-            on_select(indices, latest);
+         if (auto s = find_subject<selection_list_element*>(this))
+         {
+            std::vector<std::size_t> indices = s->get_selection();
+            int latest = s->get_select_end();
+            if (latest >= 0)
+               on_select(indices, latest);
+         }
       }
       return r;
    }
@@ -230,7 +248,7 @@ namespace cycfi { namespace elements
 
    void draggable_element::draw(context const& ctx)
    {
-      if (is_selected() && is_enabled())
+      if (ctx.enabled && is_selected() && is_enabled())
       {
          auto& canvas_ = ctx.canvas;
 
@@ -239,18 +257,7 @@ namespace cycfi { namespace elements
          canvas_.fill_style(get_theme().indicator_color.opacity(0.6));
          canvas_.fill();
       }
-      if (is_enabled())
-      {
-         proxy_base::draw(ctx);
-      }
-      else
-      {
-         auto r = override_theme(
-            &theme::label_font_color
-          , get_theme().inactive_font_color
-         );
-         proxy_base::draw(ctx);
-      }
+      proxy_base::draw(ctx);
    }
 
    namespace
@@ -308,7 +315,7 @@ namespace cycfi { namespace elements
          std::size_t _num_boxes = 0;
       };
 
-      template <typename Subject>
+      template <concepts::Element Subject>
       inline proxy<remove_cvref_t<Subject>, drag_image_element>
       drag_image(Subject&& subject, std::size_t num_boxes)
       {
@@ -355,7 +362,7 @@ namespace cycfi { namespace elements
                                  if (i == p->focus_index())
                                  {
                                     // Lose the focus if the element to be deleted is the focus
-                                    p->relinquish_focus(*cctx);
+                                    relinquish_focus(*p, *cctx);
                                     break;
                                  }
                               }
@@ -375,16 +382,17 @@ namespace cycfi { namespace elements
       return false;
    }
 
-   element* draggable_element::hit_test(context const& ctx, point p, bool leaf, bool control)
+   element* draggable_element::hit_test(context const& ctx, point p, bool /*leaf*/, bool /*control*/)
    {
-      unused(leaf, control);
-      if (is_enabled() && ctx.bounds.includes(p))
+      if (ctx.enabled && is_enabled() && ctx.bounds.includes(p))
          return this;
       return nullptr;
    }
 
    void draggable_element::begin_tracking(context const& ctx, tracker_info& track_info)
    {
+      using namespace std::chrono_literals;
+
       track_info.processed = false;
       if (track_info.modifiers & (mod_shift | mod_action))
          return;
@@ -398,22 +406,32 @@ namespace cycfi { namespace elements
             std::size_t num_boxes = std::min<std::size_t>(s->get_selection().size(), max_boxes);
             bounds.right += item_offset * num_boxes;
             bounds.bottom += item_offset * num_boxes;
+            auto* di = find_parent<drop_inserter_element *>(ctx);
+            auto where = ctx.canvas.user_to_device(track_info.current);
 
-            _drag_image = share(
-               floating(bounds,
-                  drag_image(link(this->subject()), num_boxes)
-               )
+            ctx.view.post(250ms,
+               [bounds, num_boxes, &view = ctx.view, this, di, where]()
+               {
+                  if (is_tracking())
+                  {
+                     _drag_image = share(
+                        floating(bounds,
+                           drag_image(link(this->subject()), num_boxes)
+                        )
+                     );
+
+                     view.add(_drag_image);
+                     view.refresh();
+
+                     if (di)
+                     {
+                        payload pl;
+                        pl[address_to_string(di)] = {};
+                        view.track_drop({pl, where}, cursor_tracking::entering);
+                     }
+                  }
+               }
             );
-            ctx.view.add(_drag_image);
-            ctx.view.refresh();
-
-            if (auto* di = find_parent<drop_inserter_element *>(ctx))
-            {
-               payload pl;
-               pl[address_to_string(di)] = {};
-               auto where = ctx.canvas.user_to_device(track_info.current);
-               ctx.view.track_drop({pl, where}, cursor_tracking::entering);
-            }
             track_info.processed = true;
          }
       }
@@ -488,5 +506,5 @@ namespace cycfi { namespace elements
          }
       }
    }
-}}
+}
 

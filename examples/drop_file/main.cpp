@@ -1,5 +1,5 @@
 /*=============================================================================
-   Copyright (c) 2016-2020 Joel de Guzman
+   Copyright (c) 2016-2023 Joel de Guzman
 
    Distributed under the MIT License (https://opensource.org/licenses/MIT)
 =============================================================================*/
@@ -7,15 +7,13 @@
 
 using namespace cycfi::elements;
 
-using cycfi::artist::rgba;
-
 // Main window background color
 auto constexpr bkd_color = rgba(35, 35, 37, 255);
 auto background = box(bkd_color);
 
 int main(int argc, char* argv[])
 {
-   app _app(argc, argv, "Drop File", "com.cycfi.drop-file");
+   app _app("Drop File");
    window _win(_app.name());
    _win.on_close = [&_app]() { _app.stop(); };
 

@@ -6,7 +6,6 @@
 #include <elements.hpp>
 
 using namespace cycfi::elements;
-using cycfi::artist::rgba;
 
 // Main window background color
 auto constexpr bkd_color = rgba(35, 35, 37, 255);
@@ -34,7 +33,7 @@ struct basic_row : htile_composite
 
 int main(int argc, char* argv[])
 {
-   app _app(argc, argv, "Active Dynamic List", "com.cycfi.active-list");
+   app _app("Active Dynamic List");
    window _win(_app.name());
    _win.on_close = [&_app]() { _app.stop(); };
 

@@ -7,7 +7,6 @@
 
 using namespace cycfi::elements;
 using namespace std::chrono_literals;
-using cycfi::artist::rgba;
 
 // Main window background color
 auto constexpr bkd_color = rgba(35, 35, 37, 255);
@@ -73,7 +72,7 @@ void make_alert(view& _view, app& _app)
 
 int main(int argc, char* argv[])
 {
-   app _app(argc, argv, "Popups", "com.cycfi.popups");
+   app _app("Popups");
    window _win(_app.name());
    _win.on_close = [&_app]() { _app.stop(); };
 

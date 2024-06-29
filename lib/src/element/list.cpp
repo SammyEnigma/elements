@@ -7,7 +7,7 @@
 #include <elements/element/port.hpp>
 #include <elements/view.hpp>
 
-namespace cycfi { namespace elements
+namespace cycfi::elements
 {
    list::list(composer_ptr composer, bool manage_externally)
     : _composer(composer)
@@ -123,7 +123,7 @@ namespace cycfi { namespace elements
       sync(ctx);
       if (_relinquish_focus_request)
       {
-         relinquish_focus(ctx);
+         relinquish_focus(*this, ctx);
          _relinquish_focus_request = false;
       }
 
@@ -157,6 +157,7 @@ namespace cycfi { namespace elements
             if (!cell.elem_ptr)
             {
                cell.elem_ptr = at(it-_cells.begin()).shared_from_this();
+               rctx.enabled = rctx.parent->enabled && cell.elem_ptr->is_enabled();
                cell.elem_ptr->layout(rctx);
                cell.layout_id = _layout_id;
             }
@@ -495,6 +496,6 @@ namespace cycfi { namespace elements
       return r;
    }
 
-}}
+}
 
 

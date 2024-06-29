@@ -1,24 +1,12 @@
 ###############################################################################
-#  Copyright (c) 2016-2023 Joel de Guzman
+#  Copyright (c) 2016-2024 Joel de Guzman
 #  Copyright (c) 2020 Michał Urbański
 #
 #  Distributed under the MIT License (https://opensource.org/licenses/MIT)
 ###############################################################################
-cmake_minimum_required(VERSION 3.7.2...3.15.0)
+cmake_minimum_required(VERSION 3.16.0)
 
-###############################################################################
-# Artist library
-
-set(ARTIST_BUILD_EXAMPLES OFF CACHE BOOL "Artist build examples")
-set(ARTIST_BUILD_TESTS OFF CACHE BOOL "Artist build tests")
-
-if (ELEMENTS_QUARTZ_2D)
-   set(ARTIST_QUARTZ_2D ON CACHE BOOL "Artist graphics backend option")
-elseif (ELEMENTS_SKIA)
-   set(ARTIST_SKIA ON CACHE BOOL "Artist graphics backend option")
-endif()
-
-add_subdirectory(artist)
+include(FetchContent)
 
 ###############################################################################
 # Sources (and Resources)
@@ -32,37 +20,49 @@ set(ELEMENTS_SOURCES
    src/element/element.cpp
    src/element/floating.cpp
    src/element/flow.cpp
-   src/element/gallery/button.cpp
-   src/element/gallery/check_box.cpp
-   src/element/gallery/icon_button.cpp
-   src/element/gallery/menu.cpp
-   src/element/gallery/radio_button.cpp
-   src/element/gallery/slide_switch.cpp
-   src/element/gallery/tab.cpp
-   src/element/gallery/thumbwheel.cpp
    src/element/grid.cpp
    src/element/image.cpp
    src/element/label.cpp
    src/element/layer.cpp
    src/element/list.cpp
    src/element/menu.cpp
-   src/element/misc.cpp
    src/element/popup.cpp
    src/element/port.cpp
-   src/element/progress_bar.cpp
    src/element/proxy.cpp
    src/element/range_slider.cpp
    src/element/selection.cpp
    src/element/slider.cpp
+   src/element/status_bar.cpp
+   src/element/style/border.cpp
+   src/element/style/button.cpp
+   src/element/style/check_box.cpp
+   src/element/style/grid_lines.cpp
+   src/element/style/icon_button.cpp
+   src/element/style/menu.cpp
+   src/element/style/misc.cpp
+   src/element/style/radio_button.cpp
+   src/element/style/slide_switch.cpp
+   src/element/style/slider.cpp
+   src/element/style/thumbwheel.cpp
    src/element/text.cpp
    src/element/thumbwheel.cpp
    src/element/tile.cpp
    src/element/tooltip.cpp
+   src/support/canvas.cpp
    src/support/draw_utils.cpp
-   src/support/text_utils.cpp
+   src/support/font.cpp
+   src/support/glyphs.cpp
+   src/support/pixmap.cpp
    src/support/receiver.cpp
+   src/support/rect.cpp
+   src/support/text_utils.cpp
+   src/support/resource_paths.cpp
+   src/support/text_utils.cpp
    src/support/theme.cpp
    src/support/payload.cpp
+   src/support/receiver.cpp
+   src/support/text_utils.cpp
+   src/support/theme.cpp
    src/view.cpp
 )
 
@@ -73,53 +73,71 @@ set(ELEMENTS_HEADERS
    include/elements/element.hpp
    include/elements/element/align.hpp
    include/elements/element/button.hpp
+   include/elements/element/collapsable.hpp
    include/elements/element/composite.hpp
    include/elements/element/dial.hpp
    include/elements/element/drag_and_drop.hpp
    include/elements/element/element.hpp
+   include/elements/element/events_intercept.hpp
    include/elements/element/floating.hpp
    include/elements/element/flow.hpp
-   include/elements/element/gallery.hpp
-   include/elements/element/gallery/button.hpp
-   include/elements/element/gallery/caption.hpp
-   include/elements/element/gallery/check_box.hpp
-   include/elements/element/gallery/thumbwheel.hpp
-   include/elements/element/gallery/dialog.hpp
-   include/elements/element/gallery/group.hpp
-   include/elements/element/gallery/icon_button.hpp
-   include/elements/element/gallery/menu.hpp
-   include/elements/element/gallery/message_box.hpp
-   include/elements/element/gallery/notebook.hpp
-   include/elements/element/gallery/pane.hpp
-   include/elements/element/gallery/radio_button.hpp
-   include/elements/element/gallery/tab.hpp
-   include/elements/element/gallery/text_entry.hpp
    include/elements/element/grid.hpp
    include/elements/element/image.hpp
    include/elements/element/indirect.hpp
+   include/elements/element/hidable.hpp
    include/elements/element/label.hpp
    include/elements/element/layer.hpp
    include/elements/element/list.hpp
    include/elements/element/margin.hpp
    include/elements/element/menu.hpp
-   include/elements/element/misc.hpp
+   include/elements/element/modal.hpp
    include/elements/element/popup.hpp
    include/elements/element/port.hpp
-   include/elements/element/progress_bar.hpp
    include/elements/element/proxy.hpp
    include/elements/element/range_slider.hpp
    include/elements/element/selection.hpp
    include/elements/element/size.hpp
    include/elements/element/slider.hpp
+   include/elements/element/status_bar.hpp
+   include/elements/element/style.hpp
+   include/elements/element/style/border.hpp
+   include/elements/element/style/button.hpp
+   include/elements/element/style/caption.hpp
+   include/elements/element/style/check_box.hpp
+   include/elements/element/style/dialog.hpp
+   include/elements/element/style/grid_lines.hpp
+   include/elements/element/style/group.hpp
+   include/elements/element/style/icon_button.hpp
+   include/elements/element/style/menu.hpp
+   include/elements/element/style/message_box.hpp
+   include/elements/element/style/misc.hpp
+   include/elements/element/style/notebook.hpp
+   include/elements/element/style/pane.hpp
+   include/elements/element/style/radio_button.hpp
+   include/elements/element/style/tab.hpp
+   include/elements/element/style/text_entry.hpp
+   include/elements/element/style/thumbwheel.hpp
    include/elements/element/text.hpp
    include/elements/element/thumbwheel.hpp
    include/elements/element/tile.hpp
    include/elements/element/tracker.hpp
    include/elements/support.hpp
+   include/elements/support/canvas.hpp
+   include/elements/support/circle.hpp
+   include/elements/support/color.hpp
    include/elements/support/context.hpp
+   include/elements/support/detail/canvas_impl.hpp
+   include/elements/support/detail/scratch_context.hpp
+   include/elements/support/detail/stb_image.h
    include/elements/support/draw_utils.hpp
+   include/elements/support/font.hpp
+   include/elements/support/glyphs.hpp
    include/elements/support/icon_ids.hpp
+   include/elements/support/pixmap.hpp
+   include/elements/support/point.hpp
    include/elements/support/receiver.hpp
+   include/elements/support/rect.hpp
+   include/elements/support/resource_paths.hpp
    include/elements/support/text_utils.hpp
    include/elements/support/theme.hpp
    include/elements/view.hpp
@@ -166,7 +184,6 @@ source_group("Header Files\\elements"
    ${ELEMENTS_HEADERS}
 )
 
-add_subdirectory(infra)
 add_library(elements STATIC)
 
 target_sources(elements
@@ -175,20 +192,16 @@ target_sources(elements
 )
 
 target_include_directories(elements PUBLIC include)
-target_link_libraries(elements PUBLIC cycfi::infra)
-if(CMAKE_CXX_STANDARD EQUAL 20)
-   target_compile_features(elements PUBLIC cxx_std_20)
-else()
-   target_compile_features(elements PUBLIC cxx_std_17)
-endif()
+target_compile_features(elements PUBLIC cxx_std_20)
 
 if(ELEMENTS_ENABLE_LTO)
    set_target_properties(elements PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
 
-if (NOT MSVC)
-   find_package(PkgConfig REQUIRED)
-endif()
+###############################################################################
+# PkgConfig
+
+find_package(PkgConfig REQUIRED)
 
 ###############################################################################
 # Get rid of certain warnings, and make msvc support utf-8 without adding bom
@@ -202,7 +215,7 @@ target_compile_options(elements PRIVATE
 
 if (MSVC)
    # Kinda silly to have to do this: https://bit.ly/2ZXjzzn
-   STRING(REGEX REPLACE "/W3" "/W4" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+   STRING(REGEX REPLACE "/W3" "/W4" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 endif()
 
 if (APPLE)
@@ -211,24 +224,42 @@ if (APPLE)
 endif()
 
 ###############################################################################
+# Cycfi Infra
+
+FetchContent_Declare(
+  cycfi_infra
+  GIT_REPOSITORY https://github.com/cycfi/infra.git
+  GIT_TAG master
+  GIT_SUBMODULES_RECURSE ON
+)
+
+FetchContent_MakeAvailable(cycfi_infra)
+target_link_libraries(elements PUBLIC cycfi::infra)
+
+###############################################################################
+# Cairo
+
+pkg_check_modules(cairo REQUIRED IMPORTED_TARGET cairo)
+target_link_libraries(elements PUBLIC PkgConfig::cairo)
+
+
+###############################################################################
 # Fontconfig
 
-if (MSVC)
-   target_include_directories(elements PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/external/fontconfig/include)
-elseif (APPLE OR UNIX OR WIN32)
-   pkg_check_modules(fontconfig REQUIRED IMPORTED_TARGET fontconfig)
-   target_link_libraries(elements PUBLIC PkgConfig::fontconfig)
-endif()
+pkg_check_modules(fontconfig REQUIRED IMPORTED_TARGET fontconfig)
+target_link_libraries(elements PUBLIC PkgConfig::fontconfig)
 
 ###############################################################################
 # Freetype
 
-if (MSVC)
-   target_include_directories(elements PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/external/freetype/include)
-elseif (APPLE OR UNIX OR WIN32)
-   pkg_check_modules(freetype2 REQUIRED IMPORTED_TARGET freetype2)
-   target_link_libraries(elements PUBLIC PkgConfig::freetype2)
-endif()
+pkg_check_modules(freetype2 REQUIRED IMPORTED_TARGET freetype2)
+target_link_libraries(elements PUBLIC PkgConfig::freetype2)
+
+###############################################################################
+# Webp
+
+pkg_check_modules(libwebp REQUIRED IMPORTED_TARGET libwebp)
+target_link_libraries(elements PUBLIC PkgConfig::libwebp)
 
 ###############################################################################
 # GTK3
@@ -240,7 +271,16 @@ endif()
 
 ###############################################################################
 # Asio headers
-target_include_directories(elements PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/external/asio/asio/include)
+
+FetchContent_Declare(
+  asio
+  GIT_REPOSITORY https://github.com/chriskohlhoff/asio.git
+  GIT_TAG asio-1-29-0
+  GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(asio)
+
+target_include_directories(elements PUBLIC ${asio_SOURCE_DIR}/asio/include)
 
 ###############################################################################
 # Global options
@@ -300,17 +340,17 @@ endif()
 
 if (UNIX OR (WIN32 AND NOT MSVC))
    find_package(Threads)
-   target_link_libraries(elements PUBLIC Threads::Threads artist)
+   target_link_libraries(elements PUBLIC Threads::Threads)
 endif()
 
 # ASIO requires this
 if (WIN32 AND NOT MSVC)
-   target_link_libraries(elements PUBLIC ws2_32 artist)
+   target_link_libraries(elements PUBLIC ws2_32)
 endif()
 
 # Replace missing Shcore library removed by WIN32_LEAN_AND_MEAN
 if (WIN32)
-   target_link_libraries(elements PUBLIC Shcore artist)
+   target_link_libraries(elements PUBLIC Shcore)
 endif()
 
 add_library(cycfi::elements ALIAS elements)

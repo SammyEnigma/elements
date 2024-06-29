@@ -6,54 +6,34 @@
 #if !defined(ELEMENTS_TEXT_APRIL_17_2016)
 #define ELEMENTS_TEXT_APRIL_17_2016
 
-#include <elements/element/element.hpp>
+#include <elements/support/glyphs.hpp>
 #include <elements/support/theme.hpp>
-#include <elements/support/receiver.hpp>
-#include <artist/text_layout.hpp>
+#include <elements/element/element.hpp>
 
 #include <infra/string_view.hpp>
 #include <string>
 #include <vector>
-#include <set>
 
 namespace cycfi::elements
 {
-   using artist::font_descr;
-   using artist::font;
-
    ////////////////////////////////////////////////////////////////////////////
    // text_reader and text_writer mixins
    ////////////////////////////////////////////////////////////////////////////
-   class text_reader_u8
+   class text_reader
    {
    public:
 
-      virtual                       ~text_reader_u8() = default;
-      virtual std::string_view      get_text() const = 0;
+      virtual                    ~text_reader() = default;
+      virtual std::string const& get_text() const = 0;
+      char const*                c_str() const { return get_text().c_str(); }
    };
 
    class text_writer
    {
    public:
 
-      virtual                       ~text_writer() = default;
-      virtual void                  set_text(string_view text) = 0;
-   };
-
-   class text_reader_u32
-   {
-   public:
-
-      virtual                       ~text_reader_u32() = default;
-      virtual std::u32string_view   get_text() const = 0;
-   };
-
-   class text_writer_u32
-   {
-   public:
-
-      virtual                       ~text_writer_u32() = default;
-      virtual void                  set_text(std::u32string_view text) = 0;
+      virtual                    ~text_writer() = default;
+      virtual void               set_text(string_view text) = 0;
    };
 
    ////////////////////////////////////////////////////////////////////////////
@@ -61,17 +41,14 @@ namespace cycfi::elements
    ////////////////////////////////////////////////////////////////////////////
    class static_text_box
     : public element
-    , public text_reader_u32
-    , public text_writer_u32
-    , public receiver<std::u32string_view>
+    , public text_reader
+    , public text_writer
+    , public receiver<std::string>
    {
    public:
-
-      using text_layout_const = artist::text_layout const;
-
                               static_text_box(
-                                 std::string_view text
-                               , font_descr font_  = get_theme().text_box_font
+                                 std::string text
+                               , font font_        = get_theme().text_box_font
                                , color color_      = get_theme().text_box_font_color
                               );
 
@@ -81,33 +58,27 @@ namespace cycfi::elements
       void                    layout(context const& ctx) override;
       void                    draw(context const& ctx) override;
 
-      std::u32string_view     get_text() const override           { return _layout.text(); }
-      void                    set_text(std::u32string_view text) override;
-      void                    set_text(std::string_view text);
+      std::string const&      get_text() const override            { return _text; }
+      void                    set_text(string_view text) override;
+      std::string const&      get_utf8() const                    { return _text; }
+      void                    set_utf8(string_view text)          { set_text(text); };
 
-      std::string             get_utf8() const;
-      void                    set_utf8(std::string_view text)     { set_text(text); }
+      std::string const&      value() const override           { return _text; }
+      void                    value(string_view val) override;
 
-      std::u32string_view     value() const override              { return _layout.text(); }
-      void                    value(std::u32string_view val) override;
-
-      std::size_t             insert(std::size_t pos, std::string_view text);
-      std::size_t             replace(std::size_t pos, std::size_t len, std::string_view text);
-      void                    erase(std::size_t pos, std::size_t len);
-
-      text_layout_const&      get_layout() const         { return _layout; }
-      point                   current_size() const       { return _current_size; };
       void                    set_color(color c)         { _color = c; }
       color                   get_color() const          { return _color; }
-      void                    set_font(font_descr f)     { _font = f; }
-      font const&             get_font() const           { return _font; }
+      point                   current_size() const       { return _current_size; };
 
    private:
 
       void                    sync() const;
 
-      class font              _font;
-      artist::text_layout     _layout;
+   protected:
+
+      std::string             _text;
+      mutable master_glyphs   _layout;
+      std::vector<glyphs>     _rows;
       color                   _color;
       point                   _current_size = {-1, -1};
    };
@@ -118,12 +89,9 @@ namespace cycfi::elements
    class basic_text_box : public static_text_box
    {
    public:
-
-      using static_text_box::set_text;
-
                               basic_text_box(
-                                 std::string_view text
-                               , font_descr font_ = get_theme().text_box_font
+                                 std::string text
+                               , font font_ = get_theme().text_box_font
                               );
                               ~basic_text_box();
                               basic_text_box(basic_text_box&& rhs) = default;
@@ -134,12 +102,12 @@ namespace cycfi::elements
       bool                    cursor(context const& ctx, point p, cursor_tracking status) override;
       bool                    key(context const& ctx, key_info k) override;
       bool                    wants_focus() const override;
-      void                    begin_focus(focus_request req = restore_previous) override;
-      void                    end_focus() override;
+      void                    begin_focus(focus_request req) override;
+      bool                    end_focus() override;
       bool                    wants_control() const override;
 
       bool                    text(context const& ctx, text_info info) override;
-      void                    set_text(std::u32string_view text) override;
+      void                    set_text(string_view text) override;
 
       using element::focus;
       using static_text_box::get_text;
@@ -152,14 +120,15 @@ namespace cycfi::elements
       void                    select_none();
       void                    scroll_into_view()      { _scroll_into_view = true; }
 
-      void                    home();
-      void                    end();
+      void                    home(bool shift = false);
+      void                    end(bool shift = false);
 
       virtual void            draw_selection(context const& ctx);
       virtual void            draw_caret(context const& ctx);
-      virtual bool            word_break(int index) const;
-      virtual bool            line_break(int index) const;
+      virtual bool            word_break(char const* utf8) const;
+      virtual bool            line_break(char const* utf8) const;
 
+      bool                    is_focus() const              { return _is_focus; }
       basic_text_box&&        read_only() { _read_only = true; return std::move(*this); }
       void                    read_only(bool read_only_)    { _read_only = read_only_; }
       bool                    editable() const              { return !_read_only && _enabled; }
@@ -169,33 +138,34 @@ namespace cycfi::elements
       bool                    is_enabled() const override   { return _enabled; };
       void                    enable(bool e) override       { _enabled = e; };
 
-   protected:
-
       void                    scroll_into_view(context const& ctx, bool save_x);
       virtual void            delete_(bool forward);
       virtual void            cut(view& v, int start, int end);
       virtual void            copy(view& v, int start, int end);
       virtual void            paste(view& v, int start, int end);
 
-   private:
+   protected:
 
-      struct caret_metrics
+      struct glyph_metrics
       {
-         char32_t const*      str;           // The start of the string
-         point                pos;           // Position where glyph is drawn
-         rect                 caret;         // Caret bounds
-         float                line_height;   // Line height
+         char const* str;           // The start of the utf8 string
+         point       pos;           // Position where glyph is drawn
+         rect        bounds;        // Glyph bounds
+         float       line_height;   // Line height
       };
 
-      char32_t const*         caret_position(context const& ctx, point p);
-      caret_metrics           caret_info(context const& ctx, char32_t const* s);
+      char const*             caret_position(context const& ctx, point p);
+      glyph_metrics           glyph_info(context const& ctx, char const* s);
+
+   private:
 
       struct state_saver;
       using state_saver_f = std::function<void()>;
-      using state_saver_ptr = std::shared_ptr<state_saver>;
-      using state_saver_set = std::set<state_saver_ptr>;
 
       state_saver_f           capture_state();
+
+      using this_handle = std::shared_ptr<basic_text_box*>;
+      using this_weak_handle = std::weak_ptr<basic_text_box*>;
 
       int                     _select_start;
       int                     _select_end;
@@ -207,12 +177,28 @@ namespace cycfi::elements
       bool                    _read_only : 1;
       bool                    _enabled : 1;
       bool                    _scroll_into_view : 1;
-      state_saver_set         _state_savers;
+      this_handle             _this_handle;
    };
 
-   ////////////////////////////////////////////////////////////////////////////
-   // Input Text Box
-   ////////////////////////////////////////////////////////////////////////////
+   /**
+    * \brief
+    *    Represents a basic input box derived from the basic_text_box class,
+    *    specialized for single-line text entry.
+    *
+    *    The `basic_input_box` class is a specialized version of the
+    *    `basic_text_box` class. It inherits all the functionality of a
+    *    `basic_text_box`, and adds support for placeholder text and text
+    *    clipping actions.\n\n
+    *
+    *    The placeholder text is displayed when the input box is empty,
+    *    providing a hint to the user about what they should enter. The text
+    *    clipping action determines how the text is handled when it exceeds
+    *    the box's width.\n\n
+    *
+    *    This class is specifically designed for single-line text entry,
+    *    making it ideal for forms, search boxes, and other UI elements where
+    *    the user needs to input a small amount of text.
+    */
    class basic_input_box : public basic_text_box
    {
    public:
@@ -220,14 +206,21 @@ namespace cycfi::elements
       using basic_text_box::get_text;
 
       using text_function = std::function<void(string_view text)>;
+      using enter_function = std::function<bool(string_view text)>;
+      using escape_function = std::function<void()>;
+
+      enum clip_action { clip_none, clip_left, clip_right };
 
                               basic_input_box(
                                  std::string placeholder = ""
-                               , font_descr font_ = get_theme().text_box_font
-                              )
-                               : basic_text_box("", font_)
-                               , _placeholder(std::move(placeholder))
-                              {}
+                               , font font_ = get_theme().text_box_font
+                               , clip_action clip_action_ = clip_right
+                              );
+
+                              basic_input_box(
+                                 std::string placeholder = ""
+                               , clip_action clip_action_ = clip_right
+                              );
 
                               basic_input_box(basic_input_box&& rhs) = default;
 
@@ -238,20 +231,82 @@ namespace cycfi::elements
       void                    delete_(bool forward) override;
 
       bool                    click(context const& ctx, mouse_button btn) override;
-      void                    begin_focus(focus_request req = restore_previous) override;
-      void                    end_focus() override;
+      bool                    cursor(context const& ctx, point p, cursor_tracking status) override;
+      bool                    scroll(context const& ctx, point dir, point p) override;
+      bool                    end_focus() override;
 
       text_function           on_text;
-      text_function           on_enter;
-      text_function           on_end_focus;
+      enter_function          on_enter;
+      escape_function         on_escape;
+      enter_function          on_end_focus;
 
    private:
 
       void                    paste(view& v, int start, int end) override;
+      void                    make_maximally_visible(context const& ctx);
+      void                    limit_scroll_right(context const& ctx);
 
       std::string             _placeholder;
-      bool                    _first_focus;
+      clip_action             _clip_action : 2;
+      bool                    _is_hovering : 1;
    };
+
+   //--------------------------------------------------------------------------
+   // Inlines
+   //--------------------------------------------------------------------------
+
+   /**
+    * \brief
+    *    Constructs a basic_input_box with a placeholder, font, and clip
+    *    action.
+    *
+    *    This constructor initializes a basic_input_box with a specified
+    *    placeholder text, font, and clip action. The clip action determines
+    *    how the text is clipped when it exceeds the box's width.
+    *
+    * \param placeholder
+    *    The placeholder text to display when the input box is empty.
+    *
+    * \param font_
+    *    The font to use for the text in the input box.
+    *
+    * \param clip_action_
+    *    The action to take when the text exceeds the box's width.
+    */
+   inline basic_input_box::basic_input_box(
+      std::string placeholder
+    , font font_
+    , clip_action clip_action_
+   )
+    : basic_text_box{"", font_}
+    , _placeholder{std::move(placeholder)}
+    , _clip_action{clip_action_}
+   {}
+
+   /**
+    * \brief
+    *    Constructs a basic_input_box with a placeholder and clip action.
+    *
+    *    This constructor initializes a basic_input_box with a specified
+    *    placeholder text and clip action. The font is set to the default
+    *    text box font from the current theme.
+    *
+    * \param placeholder
+    *    The placeholder text to display when the input box is empty.
+    *
+    * \param clip_action_
+    *    The action to take when the text exceeds the box's width.
+    */
+   inline basic_input_box::basic_input_box(
+      std::string placeholder
+    , clip_action clip_action_
+   )
+    : basic_input_box{
+         placeholder
+       , get_theme().text_box_font
+       , clip_action_
+      }
+   {}
 }
 
 #endif

@@ -7,38 +7,24 @@
 #define ELEMENTS_CONTEXT_APRIL_17_2016
 
 #include <infra/string_view.hpp>
-#include <artist/point.hpp>
-#include <artist/rect.hpp>
+#include <elements/support/point.hpp>
+#include <elements/support/rect.hpp>
 #include <functional>
 
-namespace cycfi::artist
-{
-   class canvas;
-}
-
-namespace cycfi::artist
-{
-   ////////////////////////////////////////////////////////////////////////////////////////////////
-   // Forward declarations
-
-   point    device_to_user(point p, canvas& cnv);
-   rect     device_to_user(rect const& r, canvas& cnv);
-}
-
-namespace cycfi::elements
+namespace cycfi { namespace elements
 {
    ////////////////////////////////////////////////////////////////////////////////////////////////
    // Forward declarations
 
    class view;
    class element;
-   using artist::canvas;
-   using artist::rect;
-   using artist::point;
+   class canvas;
 
    point    cursor_pos(view const& v);
    rect     view_bounds(view const& v);
-   void     cache_element_bounds(view& v, element* e, rect const& bounds);
+   point    device_to_user(point p, canvas& cnv);
+   rect     device_to_user(rect const& r, canvas& cnv);
+   bool     is_enabled(element const& e);
 
    ////////////////////////////////////////////////////////////////////////////////////////////////
    // Contexts
@@ -73,19 +59,28 @@ namespace cycfi::elements
    {
    public:
 
-      context(context const& rhs, artist::rect bounds_)
-       : basic_context(rhs.view, rhs.canvas), element(rhs.element)
-       , parent(rhs.parent), bounds(bounds_)
+      context(context const& rhs, elements::rect bounds_)
+       : basic_context{rhs.view, rhs.canvas}
+       , element{rhs.element}
+       , parent{rhs.parent}
+       , bounds{bounds_}
+       , enabled{rhs.enabled}
       {}
 
-      context(context const& parent_, element* element_, artist::rect bounds_)
-       : basic_context(parent_.view, parent_.canvas), element(element_)
-       , parent(&parent_), bounds(bounds_)
+      context(context const& parent_, element* element_, elements::rect bounds_)
+       : basic_context{parent_.view, parent_.canvas}
+       , element{element_}
+       , parent{&parent_}
+       , bounds{bounds_}
+       , enabled{parent_.enabled && element && is_enabled(*element)}
       {}
 
-      context(class view& view_, class canvas& canvas_, element* element_, artist::rect bounds_)
-       : basic_context(view_, canvas_), element(element_)
-       , parent(nullptr), bounds(bounds_)
+      context(class view& view_, class canvas& canvas_, element* element_, elements::rect bounds_)
+       : basic_context{view_, canvas_}
+       , element{element_}
+       , parent{nullptr}
+       , bounds{bounds_}
+       , enabled{element && is_enabled(*element)}
       {}
 
       context(context const&) = default;
@@ -98,38 +93,11 @@ namespace cycfi::elements
          return ctx;
       }
 
-      template <typename T, typename F>
-      void listen(F&& f)
-      {
-         _listener =
-            [f](auto const& ctx, auto* e, auto what)
-            {
-               if (auto te = dynamic_cast<T*>(e))
-                  f(ctx, *te, what);
-            };
-      }
-
-      void notify(context const& ctx, string_view what, elements::element* e) const
-      {
-         if (_listener)
-            _listener(ctx, e, what);
-         if (parent)
-            parent->notify(ctx, what, e);
-      }
-
-      elements::element*            element;
-      context const*                parent;
-      elements::rect                bounds;
-
-   private:
-
-      using listener_function =
-         std::function<
-            void(context const& ctx, elements::element*, string_view what)
-         >;
-
-      listener_function             _listener;
+      elements::element*   element;
+      context const*       parent;
+      elements::rect       bounds;
+      bool                 enabled;
    };
-}
+}}
 
 #endif

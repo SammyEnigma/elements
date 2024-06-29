@@ -6,15 +6,15 @@
 #include <elements/element/label.hpp>
 #include <elements/support/text_utils.hpp>
 
-namespace cycfi { namespace elements
+namespace cycfi::elements
 {
-   view_limits default_label::limits(basic_context const& ctx) const
+   view_limits default_label_styler::limits(basic_context const& ctx) const
    {
-      auto  size = measure_text(ctx.canvas, get_text(), get_font().size(get_font_size()));
+      auto  size = measure_text(ctx.canvas, get_text().c_str(), get_font().size(get_font_size()));
       return {{size.x, size.y}, {size.x, size.y}};
    }
 
-   void default_label::draw(context const& ctx)
+   void default_label_styler::draw(context const& ctx)
    {
       auto& canvas_ = ctx.canvas;
       auto  state = canvas_.new_state();
@@ -25,11 +25,11 @@ namespace cycfi { namespace elements
          align |= get_theme().label_text_align & 0x1C;
 
       auto text_c = get_font_color();
-      if (!is_enabled())
+      if (!ctx.enabled || !is_enabled())
          text_c = text_c.opacity(text_c.alpha * get_theme().disabled_opacity);
 
       canvas_.fill_style(text_c);
-      canvas_.font(get_font().size(get_font_size()));
+      canvas_.font(get_font(), get_font_size());
 
       float cx = ctx.bounds.left + (ctx.bounds.width() / 2);
       switch (align & 0x3)
@@ -58,17 +58,17 @@ namespace cycfi { namespace elements
       }
 
       canvas_.text_align(align);
-      canvas_.fill_text(get_text(), point{cx, cy});
+      canvas_.fill_text(get_text().c_str(), point{cx, cy});
    }
 
-   void default_label::enable(bool state)
+   void default_label_styler::enable(bool state)
    {
       _is_enabled = state;
    }
 
-   bool default_label::is_enabled() const
+   bool default_label_styler::is_enabled() const
    {
       return _is_enabled;
    }
-}}
+}
 

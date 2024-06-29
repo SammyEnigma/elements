@@ -6,12 +6,12 @@
 #if !defined(ELEMENTS_TRACKER_AUGUST_29_2016)
 #define ELEMENTS_TRACKER_AUGUST_29_2016
 
-#include <artist/point.hpp>
+#include <elements/support/point.hpp>
 #include <elements/element/element.hpp>
 #include <memory>
 #include <type_traits>
 
-namespace cycfi { namespace elements
+namespace cycfi::elements
 {
    struct tracker_info
    {
@@ -59,6 +59,7 @@ namespace cycfi { namespace elements
 
       tracker_info*           get_state() { return state.get(); }
       tracker_info const*     get_state() const { return state.get(); }
+      bool                    is_tracking() const { return state.get() != nullptr; }
 
       void                    escape_tracking(context const& ctx);
 
@@ -168,6 +169,6 @@ namespace cycfi { namespace elements
          state.reset();
       }
    }
-}}
+}
 
 #endif

@@ -6,7 +6,7 @@
 #include <elements/element/grid.hpp>
 #include <elements/support/context.hpp>
 
-namespace cycfi { namespace elements
+namespace cycfi::elements
 {
    ////////////////////////////////////////////////////////////////////////////
    // Vertical Grids
@@ -17,7 +17,7 @@ namespace cycfi { namespace elements
       for (std::size_t i = 0; i != size(); ++i)
          _num_spans += at(i).span();
 
-      view_limits limits{{0.0, 0.0}, {full_extent, 0.0}};
+      view_limits limits{{ 0.0, 0.0}, {full_extent, 0.0}};
       std::size_t gi = 0;
       float prev = 0;
       float desired_total_min = 0;
@@ -90,7 +90,7 @@ namespace cycfi { namespace elements
       for (std::size_t i = 0; i != size(); ++i)
          _num_spans += at(i).span();
 
-      view_limits limits{{ 0.0, 0.0}, {0.0, full_extent}};
+      view_limits limits{{0.0, 0.0}, {0.0, full_extent}};
       std::size_t gi = 0;
       float prev = 0;
       float desired_total_min = 0;
@@ -153,4 +153,4 @@ namespace cycfi { namespace elements
       auto bottom = ctx.bounds.bottom;
       return {_positions[index]+left, top, _positions[index+1]+left, bottom};
    }
-}}
+}

@@ -6,8 +6,6 @@
 #include <elements.hpp>
 
 using namespace cycfi::elements;
-namespace colors = cycfi::artist::colors;
-using cycfi::artist::rgba;
 
 // Main window background color
 auto constexpr bkd_color = rgba(35, 35, 37, 255);
@@ -180,9 +178,11 @@ auto make_hvgrid()
    auto _box = margin({10, 10, 10, 10}, rbox_);
 
    // Place the grid in a plain array
+   // For equally spaced grids, you can use make_equal_grid<N>()
    static float const vgrid_coords[] = {0.25, 0.45, 0.6, 0.75, 0.9, 1.0};
 
    // You can also place the grid a std::array
+   // For equally spaced grids, you can use make_equal_grid<N>()
    static std::array<float, 6> const hgrid_coords = {0.25, 0.45, 0.6, 0.75, 0.9, 1.0};
 
    // All elements with span 1
@@ -392,7 +392,7 @@ auto make_popup_menu(
 
 int main(int argc, char* argv[])
 {
-   app _app(argc, argv, "Layout", "com.cycfi.layout");
+   app _app("Layout");
    window _win(_app.name(), window::standard, {50, 50, 1024, 768});
 
    _win.on_close = [&_app]() { _app.stop(); };

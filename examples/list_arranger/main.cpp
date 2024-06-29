@@ -6,7 +6,7 @@
 #include <elements.hpp>
 
 using namespace cycfi::elements;
-using cycfi::artist::rgba;
+using cycfi::elements::rgba;
 
 // Main window background
 auto make_bkd()
@@ -74,7 +74,7 @@ std::vector<std::filesystem::path> paths = {
 
 int main(int argc, char* argv[])
 {
-   app _app(argc, argv, "Active Dynamic List", "com.cycfi.list-arranger");
+   app _app("Active Dynamic List");
    window _win(_app.name());
    _win.on_close = [&_app]() { _app.stop(); };
 
@@ -85,25 +85,24 @@ int main(int argc, char* argv[])
    {
       // If we start with an empty paths vector, we still need to give it a prototypical
       // element in order to establish the size limits.
-      std::string path = paths.empty()? std::string{"Empty"} : paths[index].u8string();
+      std::string path = paths.empty()? std::string{"Empty"} : paths[index].string();
 
       return share(
-         (
-            draggable(
-               align_left(label(path))
-            )
+         draggable(
+            align_left(label(path))
          )
       );
    };
 
    auto cp = basic_vcell_composer(list_size, make_row);
    auto list = vlist(cp, false);
-   auto drop_inserter_ = share(
-                           drop_inserter(
-                              margin({10, 10, 15, 10}, link(list)),
-                              {"text/uri-list"}
-                           )
-                        );
+   auto drop_inserter_ =
+      share(
+         drop_inserter(
+            margin({10, 10, 15, 10}, link(list)),
+            {"text/uri-list"}
+         )
+      );
 
    drop_inserter_->on_drop =
       [&](drop_info const& info, std::size_t ix)

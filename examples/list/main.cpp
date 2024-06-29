@@ -6,7 +6,6 @@
 #include <elements.hpp>
 
 using namespace cycfi::elements;
-using namespace cycfi::artist;
 
 // Main window background color
 auto constexpr bkd_color = rgba(35, 35, 37, 255);
@@ -14,7 +13,7 @@ auto background = box(bkd_color);
 
 int main(int argc, char* argv[])
 {
-   app _app(argc, argv, "Lists", "com.cycfi.list");
+   app _app("Lists");
    window _win(_app.name());
    _win.on_close = [&_app]() { _app.stop(); };
 

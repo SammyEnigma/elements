@@ -9,11 +9,8 @@
 #include <elements/support/context.hpp>
 #include <elements/view.hpp>
 
-namespace cycfi { namespace elements
+namespace cycfi::elements
 {
-   ////////////////////////////////////////////////////////////////////////////
-   // composite_base class implementation
-   ////////////////////////////////////////////////////////////////////////////
    element* composite_base::hit_test(context const& ctx, point p, bool leaf, bool control)
    {
       if (!empty())
@@ -36,6 +33,51 @@ namespace cycfi { namespace elements
       );
    }
 
+   /**
+    * \brief
+    *    The `for_each_visible` function iterates over each visible item in
+    *    the composite object, executing a callback `f` for each item.
+    *
+    *    Iteration can occur in either forward or reverse order, based on the
+    *    `reverse` parameter.
+    *
+    *    The function takes into account only the items that are visible
+    *    within the specified `context ctx`. Visibility is determined by
+    *    whether the bounds of an item intersect with the bounds of the port
+    *    in the context.
+    *
+    *    The `f` callback is a function that takes the item, its index, and
+    *    its bounds. The iteration stops if the callback returns `true`.
+    *
+    * \param ctx
+    *    A reference to a `context` object. This object provides information
+    *    about the hierarchical structure of elements.
+    *
+    * \param f
+    *    A callback function of type `for_each_callback` to be executed on
+    *    each visible element in the composite.
+    *
+    * \param f
+    *    A callback function of type `for_each_callback` to be executed on
+    *    each visible element in the composite. The `for_each_callback`
+    *    function has this signature:
+    *       `bool(element& e, std::size_t ix, rect const& r)`
+    *
+    *    This function should return a boolean value, dictating whether the
+    *    traversal should continue: `true` to continue the traversal, or
+    *    `false` to stop it.
+    *
+    * \param reverse
+    *    A boolean indicating whether the items should be iterated in reverse
+    *    order.
+    *
+    * \note
+    *    The `for_each_visible` method uses a linear iteration, and while it
+    *    is suitable for small composites, it can be less efficient for large
+    *    composites with a large number of elements. Depending on the usage
+    *    scenario, and more information about layout, a more efficient custom
+    *    implementation may be necessary.
+    */
    void composite_base::for_each_visible(
       context const& ctx
     , for_each_callback f
@@ -112,13 +154,13 @@ namespace cycfi { namespace elements
                if (&e == &ce)
                {
                   f(ctx);
-                  return false; // break the for loop
+                  return true; // break the for loop
                }
                else
                {
                   ce.in_context_do(ectx, e, f);
                }
-               return true;
+               return false;
             }
          );
       }
@@ -130,33 +172,44 @@ namespace cycfi { namespace elements
       {
          if (btn.down) // button down
          {
+            _click_tracking = -1; // Assume we're not tracking
             hit_info info = hit_element(ctx, btn.pos, true);
             if (info.element_ptr && info.leaf_element_ptr)
             {
+               bool leaf_wants_focus = info.leaf_element_ptr->wants_focus();
+               bool process_click = true;
                if (_focus != info.index)
                {
-                  auto idx = info.leaf_element_ptr->wants_focus() ? info.index : -1;
-                  new_focus(ctx, idx, restore_previous);
+                  auto idx = leaf_wants_focus ? info.index : -1;
+
+                  // new_focus returns false if the current focus does not want
+                  // to yield. If so, we should not not process the click.
+                  process_click = new_focus(ctx, idx, restore_previous);
                }
 
-               if (info.element_ptr->wants_control())
+               if (process_click)
                {
-                  context ectx{ctx, info.element_ptr, info.bounds};
-                  if (info.element_ptr->click(ectx, btn))
+                  if (info.element_ptr->wants_control())
                   {
-                     if (btn.down)
-                        _click_tracking = info.index;
-                     return true;
+                     context ectx{ctx, info.element_ptr, info.bounds};
+                     if (info.element_ptr->click(ectx, btn))
+                     {
+                        if (btn.down)
+                           _click_tracking = info.index;
+                        if (!leaf_wants_focus)
+                           relinquish_focus(*this, ctx);
+                        return true;
+                     }
                   }
-               }
-               else
-               {
-                  // Clicking elsewhere should relinquish focus
-                  relinquish_focus(ctx);
+                  else
+                  {
+                     // Clicking elsewhere should relinquish focus
+                     relinquish_focus(*this, ctx);
+                  }
                }
             }
          }
-         else if (_click_tracking != -1) // button up
+         else if (_click_tracking != -1 && _click_tracking < int(size())) // button up
          {
             rect  bounds = bounds_of(ctx, _click_tracking);
             auto& e = at(_click_tracking);
@@ -174,7 +227,7 @@ namespace cycfi { namespace elements
 
    void composite_base::drag(context const& ctx, mouse_button btn)
    {
-      if (_click_tracking != -1)
+      if (_click_tracking != -1 && _click_tracking < int(size()))
       {
          rect  bounds = bounds_of(ctx, _click_tracking);
          auto& e = at(_click_tracking);
@@ -183,13 +236,15 @@ namespace cycfi { namespace elements
       }
    }
 
-   void composite_base::new_focus(context const& ctx, int index, focus_request req)
+   bool composite_base::new_focus(context const& ctx, int index, focus_request req)
    {
       // end the previous focus
-      if (_focus != -1)
+      if (_focus != -1 && _focus < int(size()))
       {
-         at(_focus).end_focus();
-         ctx.view.refresh(ctx);
+         if (at(_focus).end_focus())
+            ctx.view.refresh(ctx);
+         else
+            return false; // return false if the current focus deoes not want to yield
       }
 
       // start a new focus
@@ -200,6 +255,7 @@ namespace cycfi { namespace elements
          scrollable::find(ctx).scroll_into_view(bounds_of(ctx, _focus));
          ctx.view.refresh(ctx);
       }
+      return true;
    }
 
    bool composite_base::key(context const& ctx, key_info k)
@@ -218,12 +274,13 @@ namespace cycfi { namespace elements
          return false;
       };
 
-      auto&& try_focus = [&](auto ix, focus_request req) -> bool
+      auto&& try_focus = [&](auto ix, focus_request req, bool& focus_yields) -> bool
       {
          if (at(ix).wants_focus())
          {
-            new_focus(ctx, ix, req);
-            return true;
+            if (new_focus(ctx, ix, req))
+               return true;
+            focus_yields = false;
          }
          return false;
       };
@@ -237,6 +294,7 @@ namespace cycfi { namespace elements
       if ((k.action == key_action::press || k.action == key_action::repeat)
          && k.key == key_code::tab && size())
       {
+         bool focus_yields = true;
          auto next_focus = _focus;
          bool reverse = (k.modifiers & mod_shift) ^ reverse_index();
          if (next_focus == -1 && reverse)
@@ -245,16 +303,23 @@ namespace cycfi { namespace elements
          if (!reverse)
          {
             while (++next_focus != static_cast<int>(size()))
-               if (try_focus(next_focus, from_top))
+            {
+               if (try_focus(next_focus, from_top, focus_yields))
                   return true;
+               if (!focus_yields) // Return as if key was handled if focus
+                  return true;    // does not want to yield
+            }
             return false;
          }
          else
          {
             while (--next_focus >= 0)
-               if (at(next_focus).wants_focus())
-                  if (try_focus(next_focus, from_bottom))
-                     return true;
+            {
+               if (try_focus(next_focus, from_bottom, focus_yields))
+                  return true;
+               if (!focus_yields) // Return as if key was handled if focus
+                  return true;    // does not want to yield
+            }
             return false;
          }
       }
@@ -263,7 +328,7 @@ namespace cycfi { namespace elements
 
    bool composite_base::text(context const& ctx, text_info info)
    {
-      if (_focus != -1)
+      if (_focus != -1 && _focus < int(size()))
       {
          rect  bounds = bounds_of(ctx, _focus);
          auto& focus_ = at(_focus);
@@ -339,7 +404,7 @@ namespace cycfi { namespace elements
       if (!empty())
       {
          hit_info info = hit_element(ctx, p, true);
-         if (auto ptr = info.element_ptr; ptr && artist::intersects(info.bounds, ctx.view_bounds()))
+         if (auto ptr = info.element_ptr; ptr && elements::intersects(info.bounds, ctx.view_bounds()))
          {
             context ectx{ctx, ptr, info.bounds};
             return ptr->scroll(ectx, dir, p);
@@ -359,11 +424,19 @@ namespace cycfi { namespace elements
    void composite_base::begin_focus(focus_request req)
    {
       if (_focus == -1 && req == restore_previous)
-         _focus = _saved_focus;
-
-      if (_focus == -1)
       {
-         if (req == from_top || req == restore_previous)
+         if (_saved_focus == -1)
+            return;
+         _focus = _saved_focus;
+      }
+
+      if (_focus == -1 && req != focus_request::restore_previous)
+      {
+         bool top_down = (req == from_top);
+         if (reverse_index())
+            top_down = !top_down;
+
+         if (top_down)
          {
             for (std::size_t ix = 0; ix != size(); ++ix)
                if (at(ix).wants_focus())
@@ -372,7 +445,7 @@ namespace cycfi { namespace elements
                   break;
                }
          }
-         else if (req == from_bottom)
+         else
          {
             for (int ix = size()-1; ix >= 0; --ix)
                if (at(ix).wants_focus())
@@ -386,36 +459,73 @@ namespace cycfi { namespace elements
          at(_focus).begin_focus(req);
    }
 
-   void composite_base::end_focus()
+   bool composite_base::end_focus()
    {
+      bool yield = true;
       if (_focus != -1 && _focus < int(size()))
-         at(_focus).end_focus();
-      _saved_focus = _focus;
-      _focus = -1;
+         yield = at(_focus).end_focus();
+      if (yield)
+      {
+         _saved_focus = _focus;
+         _focus = -1;
+      }
+      return yield;
    }
 
-   void composite_base::relinquish_focus(context const& ctx)
+   /**
+    * \brief
+    *    `relinquish_focus` function is designed to navigate through
+    *    composite object hierarchy to end the focus from both the target
+    *    composite object and its hierarchical ancestors.
+    *
+    * \param c
+    *    The composite object from which focus should be dismissed. The
+    *    composite is a hierarchical structure of elements, requiring
+    *    navigation through its hierarchy to ensure focus is correctly
+    *    relinquished.
+    *
+    * \param ctx
+    *    A reference to a `context` object, which maintains the hierarchical
+    *    relationship between view and element. It holds the hierarchical
+    *    structure of elements within the view's context.
+    */
+   void relinquish_focus(composite_base& c, context const& ctx)
    {
-      if (_focus != -1)
+      if (c.focus_index() != -1)
       {
-         end_focus();
-         _saved_focus = -1;
+         c.end_focus();
+         c._focus = -1; // Force end focus
          auto [p, cctx] = find_composite(ctx);
          if (p)
-            p->relinquish_focus(*cctx);
+            relinquish_focus(*p, *cctx);
+         else
+            ctx.view.relinquish_focus();
       }
+      c._saved_focus = -1;
    }
 
    element const* composite_base::focus() const
    {
+      if (_focus >= int(size()))
+         return nullptr;
       return (empty() || (_focus == -1))? 0 : &at(_focus);
    }
-
    element* composite_base::focus()
    {
+      if (_focus >= int(size()))
+         return nullptr;
       return (empty() || (_focus == -1))? 0 : &at(_focus);
    }
 
+   /**
+    * \brief
+    *    Sets the focus to the element at the specified index within the
+    *    composite.
+    *
+    * \param index
+    *    The index of the element within the *composite_base* to focus. The
+    *    function does nothing if the index is out of bounds.
+    */
    void composite_base::focus(std::size_t index)
    {
       if (index < size())
@@ -474,7 +584,7 @@ namespace cycfi { namespace elements
          status = cursor_tracking::hovering;
          if (_cursor_hovering.find(info.index) == _cursor_hovering.end())
          {
-             status = cursor_tracking::entering;
+            status = cursor_tracking::entering;
             _cursor_hovering.insert(_cursor_tracking);
          }
          auto& e = at(_cursor_tracking);
@@ -500,6 +610,41 @@ namespace cycfi { namespace elements
       return false;
    }
 
+   /**
+    * \brief
+    *    Tests whether a point 'p' intersects an element in the
+    *    composite_base.
+    *
+    *    `hit_element` checks if a provided point 'p' intersects with any
+    *    element's bounds within the composite, under a specified context
+    *    'ctx'. When intersecting and the element is either 'control' or
+    *    'wants control', the hitting information is encapsulated in a
+    *    `hit_info` and returned.
+    *
+    * \param ctx
+    *    A reference to the basic_context of the element, which provides
+    *    access to the current view and canvas. The context can be used in
+    *    calculating size limits of the element.
+    * \param p
+    *    The point to test for a hit against elements in the composite_base.
+    * \param control
+    *    A boolean flag denoting whether to filter only control elements. If
+    *    `true`, the function checks the hit only on elements that are
+    *    controls (React to user interactions).
+    *
+    * \return hit_info
+    *    The hit information returned is structured as follows:
+    *    - `element_ptr`: The pointer to the element that was hit.
+    *    - `leaf_element_ptr`: Pointer to the nearest clickable leaf,
+    *      essentially the 'actual' hit target.
+    *    - `bounds`: The boundary rectangle (`rect`) defining the space of
+    *      the hit element.
+    *    - `index`: The index of the hit element. Note: casting from
+    *      std::size_t to int may lose precision.
+    *
+    *    If there's no element hit, the method returns a default hit_info
+    *    instance with nullptrs, empty `rect`, and -1 index.
+    */
    composite_base::hit_info composite_base::hit_element(context const& ctx, point p, bool control) const
    {
       hit_info info = hit_info{{}, {}, rect{}, -1};
@@ -525,6 +670,17 @@ namespace cycfi { namespace elements
       return info;
    }
 
+   /**
+    * \brief
+    *    Checks if any element in composite_base desires control.
+    *
+    *    `wants_control` iterates over every element inside the
+    *    composite_base. If any element wants control, the method breaks the
+    *    loop and returns true.
+    *
+    * \return bool
+    *    `true` if there's an element wanting control, `false` otherwise.
+    */
    bool composite_base::wants_control() const
    {
       for (std::size_t ix = 0; ix < size(); ++ix)
@@ -533,12 +689,18 @@ namespace cycfi { namespace elements
       return false;
    }
 
+   /**
+    * \brief
+    *    Resets the internal state of the composite_base.
+    *
+    *    `reset` reinitializes the internal tracking indices and the set of
+    *    cursor-hovered elements in the composite_base.
+    */
    void composite_base::reset()
    {
       _focus = -1;
-      _saved_focus = -1;
       _click_tracking = -1;
       _cursor_tracking = -1;
       _cursor_hovering.clear();
    }
-}}
+}

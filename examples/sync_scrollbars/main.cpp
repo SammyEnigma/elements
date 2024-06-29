@@ -4,10 +4,8 @@
    Distributed under the MIT License (https://opensource.org/licenses/MIT)
 =============================================================================*/
 #include <elements.hpp>
-#include <string>
-
+#include<string>
 using namespace cycfi::elements;
-using cycfi::artist::rgba;
 
 // Main window background color
 auto constexpr bkd_color = rgba(35, 35, 37, 255);
@@ -15,7 +13,7 @@ auto background = box(bkd_color);
 
 int main(int argc, char* argv[])
 {
-   app _app(argc, argv, "SyncScrollbars", "com.cycfi.sync-scrollbars");
+   app _app("SyncScrollbars");
    window _win(_app.name());
    _win.on_close = [&_app]() { _app.stop(); };
 
@@ -45,7 +43,7 @@ int main(int argc, char* argv[])
    // Second scrollers will follow first scroller position
    scr.on_scroll = [&](point p)
    {
-      scr2.set_position(p);
+      scr2.set_alignment(p);
       view_.layout();
       view_.refresh();
    };

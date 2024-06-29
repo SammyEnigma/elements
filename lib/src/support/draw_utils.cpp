@@ -6,12 +6,17 @@
 #include <elements/support/draw_utils.hpp>
 #include <elements/support/theme.hpp>
 
-namespace cycfi { namespace elements
+namespace cycfi::elements
 {
-   using artist::rgba;
-   using artist::rgb;
-   using artist::point;
-   namespace colors = cycfi::artist::colors;
+   corner_radii corner_radii::operator+(float v) const
+   {
+      return { top_left+v, top_right+v, bottom_right+v, bottom_left+v };
+   }
+
+   corner_radii corner_radii::operator-(float v) const
+   {
+      return *this + (-v);
+   }
 
    void draw_box_vgradient(canvas& cnv, rect bounds, float corner_radius)
    {
@@ -36,19 +41,76 @@ namespace cycfi { namespace elements
       cnv.stroke();
    }
 
-   void draw_panel(canvas& cnv, rect bounds, color c, float shadow, float corner_radius)
+   void draw_panel(canvas& cnv, rect bounds, color c, float corner_radius)
    {
       // Panel fill
-      auto save = cnv.new_state();
       cnv.begin_path();
       cnv.add_round_rect(bounds, corner_radius);
       cnv.fill_style(c);
-      if (shadow > 0)
-         cnv.shadow_style({shadow, shadow}, shadow*2, colors::black);
       cnv.fill();
+
+      // Simulated blurred shadow. cairo does not have blur yet :-(
+      {
+         auto save = cnv.new_state();
+
+         cnv.begin_path();
+         cnv.add_rect(bounds.inset(-100, -100));
+         cnv.add_round_rect(bounds.inset(0.5, 0.5), corner_radius);
+         cnv.fill_rule(canvas::fill_odd_even);
+         cnv.clip();
+
+         rect shr = bounds;
+         shr.left -= 2;
+         shr.top -= 2;
+         shr.right += 6;
+         shr.bottom += 6;
+         cnv.begin_path();
+         cnv.add_round_rect(shr, corner_radius*2);
+         cnv.fill_style(rgba(0, 0, 0, 20));
+         cnv.fill();
+
+         shr.left += 1;
+         shr.top += 1;
+         shr.right -= 2;
+         shr.bottom -= 2;
+         cnv.begin_path();
+         cnv.add_round_rect(shr, corner_radius*1.5);
+         cnv.fill_style(rgba(0, 0, 0, 30));
+         cnv.fill();
+
+         shr.left += 1;
+         shr.top += 1;
+         shr.right -= 2;
+         shr.bottom -= 2;
+         cnv.begin_path();
+         cnv.add_round_rect(shr, corner_radius);
+         cnv.fill_style(rgba(0, 0, 0, 40));
+         cnv.fill();
+      }
    }
 
-   void draw_button(canvas& cnv, rect bounds, color c, bool enabled, float corner_radius)
+   void draw_round_rect(canvas& cnv, rect bounds, corner_radii radii)
+   {
+      auto l = bounds.left;
+      auto t = bounds.top;
+      auto r = bounds.right;
+      auto b = bounds.bottom;
+      auto min_r = std::min(bounds.width(), bounds.height()) / 2;
+
+      radii.top_left = std::min(radii.top_left, min_r);
+      radii.top_right = std::min(radii.top_right, min_r);
+      radii.bottom_right = std::min(radii.bottom_right, min_r);
+      radii.bottom_left = std::min(radii.bottom_left, min_r);
+
+      cnv.begin_path();
+      cnv.arc({r- radii.bottom_right, b- radii.bottom_right}, radii.bottom_right, 0,        M_PI*0.5);
+      cnv.arc({l+ radii.bottom_left,  b- radii.bottom_left }, radii.bottom_left,  M_PI*0.5, M_PI    );
+      cnv.arc({l+ radii.top_left,     t+ radii.top_left    }, radii.top_left,     M_PI,     M_PI*1.5);
+      cnv.arc({r- radii.top_right,    t+ radii.top_right   }, radii.top_right,    M_PI*1.5, 0       );
+      cnv.close_path();
+   }
+
+   void draw_button(canvas& cnv, rect bounds, color c, bool enabled, corner_radii radii)
    {
       auto const& theme_ = get_theme();
       auto state = cnv.new_state();
@@ -66,17 +128,19 @@ namespace cycfi { namespace elements
       gradient.add_color_stop({1.0, rgb(0, 0, 0).opacity(box_opacity)});
       cnv.fill_style(gradient);
 
+      auto r = bounds.inset(1, 1);
       cnv.begin_path();
-      cnv.add_round_rect(bounds.inset(1, 1), corner_radius-1);
+      draw_round_rect(cnv, r, radii -1);
       cnv.fill_style(enabled? c : c.opacity(c.alpha * theme_.disabled_opacity));
       cnv.fill();
-      cnv.add_round_rect(bounds.inset(1, 1), corner_radius-1);
+      draw_round_rect(cnv, r, radii -1);
 
       cnv.fill_style(gradient);
       cnv.fill();
 
+      r = bounds.inset(0.5, 0.5);
       cnv.begin_path();
-      cnv.add_round_rect(bounds.inset(0.5, 0.5), corner_radius-0.5);
+      draw_round_rect(cnv, r, radii -0.5f);
       cnv.stroke_style(rgba(0, 0, 0, 48));
       cnv.stroke();
    }
@@ -135,7 +199,7 @@ namespace cycfi { namespace elements
          cnv.begin_path();
          cnv.add_circle(cp);
          cnv.add_circle(cp.inset(inset));
-         cnv.fill_rule(artist::path::fill_odd_even);
+         cnv.fill_rule(canvas::fill_odd_even);
          cnv.clip();
 
          auto bounds = cp.bounds();
@@ -144,8 +208,8 @@ namespace cycfi { namespace elements
             bounds.bottom_left()
          };
 
-         gradient.add_color_stop({0.0, rgba(0, 0, 0, 32)});
          gradient.add_color_stop({1.0, rgba(255, 255, 255, 64)});
+         gradient.add_color_stop({0.0, rgba(0, 0, 0, 32)});
          cnv.fill_style(gradient);
 
          cnv.begin_path();
@@ -184,8 +248,8 @@ namespace cycfi { namespace elements
             hcp, radius*2
          };
 
-         using cs = canvas::color_stop;
-         gradient.add_color_stop(cs{0.0f, {1.0f, 1.0f, 1.0f, 0.4f}});
+		 using cs = canvas::color_stop;
+		 gradient.add_color_stop(cs{0.0f, {1.0f, 1.0f, 1.0f, 0.4f}});
          gradient.add_color_stop(cs{1.0f, {0.6f, 0.6f, 0.6f, 0.0f}});
 
          cnv.fill_style(gradient);
@@ -211,7 +275,7 @@ namespace cycfi { namespace elements
 
          gradient.add_color_stop({0.0, colors::white.opacity(0.3)});
          gradient.add_color_stop({0.5, colors::black.opacity(0.5)});
-         cnv.fill_rule(artist::path::fill_odd_even);
+         cnv.fill_rule(canvas::fill_odd_even);
          cnv.fill_style(gradient);
 
          circle cpf = cp;
@@ -219,7 +283,6 @@ namespace cycfi { namespace elements
          cnv.add_circle(cpf);
          cpf.radius *= 0.9;
          cnv.add_circle(cpf);
-         cnv.fill_rule(artist::path::fill_odd_even);
          cnv.clip();
 
          cnv.add_circle(cp);
@@ -336,7 +399,8 @@ namespace cycfi { namespace elements
       cnv.fill_style(theme.label_font_color);
 
       cnv.font(
-         theme.label_font.size(theme.label_font._size * font_size)
+         theme.label_font,
+         theme.label_font._size * font_size
       );
 
       for (std::size_t i = 0; i != num_labels; ++i)
@@ -345,7 +409,7 @@ namespace cycfi { namespace elements
          float sin_ = std::sin(angle);
          float cos_ = std::cos(angle);
 
-         cnv.fill_text(labels[i], {cp.radius * cos_, cp.radius * sin_});
+         cnv.fill_text(labels[i].c_str(), {cp.radius * cos_, cp.radius * sin_});
       }
    }
-}}
+}

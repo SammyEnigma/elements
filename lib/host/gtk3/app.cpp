@@ -4,19 +4,15 @@
    Distributed under the MIT License [ https://opensource.org/licenses/MIT ]
 =============================================================================*/
 #include <elements/app.hpp>
-//#include <elements/support/font.hpp>
-#include <artist/resources.hpp>
 #include <infra/filesystem.hpp>
 #include <string>
 #include <functional>
 #include <vector>
 #include <gtk/gtk.h>
 
-namespace cycfi { namespace elements
+namespace cycfi::elements
 {
    // Some app globals
-   int argc = 0;
-   char** argv = nullptr;
    GtkApplication* the_app = nullptr;
    bool is_activated = false;
 
@@ -42,27 +38,17 @@ namespace cycfi { namespace elements
 
    struct init_app
    {
-      init_app(std::string id)
+      init_app()
       {
-         the_app = gtk_application_new(
-            id.c_str()
-          , G_APPLICATION_FLAGS_NONE
-         );
+         the_app = gtk_application_new(nullptr, G_APPLICATION_FLAGS_NONE);
          g_signal_connect(the_app, "activate", G_CALLBACK(activate), nullptr);
       }
    };
 
-   app::app(
-      int         argc_
-    , char*       argv_[]
-    , std::string name
-    , std::string id
-   )
-   : _app_name(name)
+   app::app(std::string name)
+    : _app_name(name)
    {
-      argc = argc_;
-      argv = argv_;
-      static init_app init{id};
+      static init_app init{};
       _app = the_app;
    }
 
@@ -73,12 +59,19 @@ namespace cycfi { namespace elements
 
    void app::run()
    {
-      g_application_run(G_APPLICATION(_app), argc, argv);
+      // g_application_run is intended to be run from main() and its return value is intended to
+      // be returned by main(). It is possible to pass nullptr if argv since commandline handling
+      // is not required. Also, on Windows, argc and argv are ignored.
+      //
+      // Given this, we will not pass argc and argv anymore. If you need to process these, you can
+      // do so somewhere in main.
+
+      g_application_run(G_APPLICATION(_app), 0, nullptr);
    }
 
    void app::stop()
    {
       g_application_release(G_APPLICATION(_app));
    }
-}}
+}
 

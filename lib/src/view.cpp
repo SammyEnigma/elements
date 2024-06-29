@@ -7,11 +7,8 @@
 #include <elements/window.hpp>
 #include <elements/support/context.hpp>
 
-namespace cycfi { namespace elements
-{
-   using artist::image;
-   using artist::offscreen_image;
-
+ namespace cycfi::elements
+ {
    view::view(extent size_)
     : base_view(size_)
     , _main_element(make_scaled_content())
@@ -46,9 +43,9 @@ namespace cycfi { namespace elements
       if (_content.empty())
          return;
 
-      image img{1, 1};
-      offscreen_image offscr{img};
-      canvas cnv{offscr.context()};
+      auto surface_ = cairo_recording_surface_create(CAIRO_CONTENT_COLOR_ALPHA, nullptr);
+      auto context_ = cairo_create(surface_);
+      canvas cnv{*context_};
 
       // Update the limits and constrain the window size to the limits
       basic_context bctx{*this, cnv};
@@ -59,9 +56,12 @@ namespace cycfi { namespace elements
          if (on_change_limits)
             on_change_limits(limits_);
       }
+
+      cairo_surface_destroy(surface_);
+      cairo_destroy(context_);
    }
 
-   void view::draw(canvas& cnv)
+   void view::draw(cairo_t* context_)
    {
       if (_content.empty())
          return;
@@ -69,6 +69,7 @@ namespace cycfi { namespace elements
       // Update the limits and constrain the window size to the limits
       set_limits();
 
+      canvas cnv{*context_};
       auto size_ = size();
       rect subj_bounds = {0, 0, size_.x, size_.y};
       context ctx{*this, cnv, &_main_element, subj_bounds};
@@ -87,14 +88,17 @@ namespace cycfi { namespace elements
    namespace
    {
       template <typename F, typename This>
-      void call(F f, This& self, rect _current_bounds)
+      void with_context_do(F f, This& self, rect _current_bounds)
       {
-         image img{1, 1};
-         offscreen_image offscr{img};
-         canvas cnv{offscr.context()};
+         auto surface_ = cairo_recording_surface_create(CAIRO_CONTENT_COLOR_ALPHA, nullptr);
+         auto context_ = cairo_create(surface_);
+         canvas cnv{*context_};
          context ctx {self, cnv, &self.main_element(), _current_bounds};
 
          f(ctx, self.main_element());
+
+         cairo_surface_destroy(surface_);
+         cairo_destroy(context_);
       }
    }
 
@@ -103,7 +107,7 @@ namespace cycfi { namespace elements
       if (_current_bounds.is_empty())
          return;
 
-      call(
+      with_context_do(
          [](auto const& ctx, auto& _main_element) { _main_element.layout(ctx); },
          *this, _current_bounds
       );
@@ -111,12 +115,12 @@ namespace cycfi { namespace elements
       refresh();
    }
 
-   void view::layout(element &element)
+   void view::layout(element& element)
    {
       if (_current_bounds.is_empty())
          return;
 
-      call(
+      with_context_do(
          [](auto const& ctx, auto& _main_element) { _main_element.layout(ctx); },
          *this, _current_bounds
       );
@@ -172,7 +176,7 @@ namespace cycfi { namespace elements
       _io.post(
          [this, &element, outward]()
          {
-            call(
+            with_context_do(
                [&element, outward](auto const& ctx, auto& _main_element)
                {
                   _main_element.refresh(ctx, element, outward);
@@ -205,11 +209,14 @@ namespace cycfi { namespace elements
       if (_content.empty())
          return;
 
-      call(
+      with_context_do(
          [btn, this](auto const& ctx, auto& _main_element)
          {
-            _main_element.click(ctx, btn);
-            _is_focus = _main_element.focus();
+            if (_main_element.click(ctx, btn))
+               _is_focus = _main_element.focus();
+            else if (btn.down)
+               elements::relinquish_focus(_content, ctx);
+            refresh(_main_element);
          },
          *this, _current_bounds
       );
@@ -221,7 +228,7 @@ namespace cycfi { namespace elements
       if (_content.empty())
          return;
 
-      call(
+      with_context_do(
          [btn](auto const& ctx, auto& _main_element)
          {
             _main_element.drag(ctx, btn);
@@ -235,7 +242,7 @@ namespace cycfi { namespace elements
       if (_content.empty())
          return;
 
-      call(
+      with_context_do(
          [p, status](auto const& ctx, auto& _main_element)
          {
             if (!_main_element.cursor(ctx, p, status))
@@ -250,7 +257,7 @@ namespace cycfi { namespace elements
       if (_content.empty())
          return;
 
-      call(
+      with_context_do(
          [dir, p](auto const& ctx, auto& _main_element)
          {
             _main_element.scroll(ctx, dir, p);
@@ -265,10 +272,10 @@ namespace cycfi { namespace elements
          return false;
 
       bool handled = false;
-      call(
+      with_context_do(
          [k, &handled](auto const& ctx, auto& _main_element)
          {
-            handled = _main_element.key(ctx, k);
+             handled = _main_element.key(ctx, k);
          },
          *this, _current_bounds
       );
@@ -281,10 +288,10 @@ namespace cycfi { namespace elements
          return false;
 
       bool handled = false;
-      call(
+      with_context_do(
          [info, &handled](auto const& ctx, auto& _main_element)
          {
-            handled = _main_element.text(ctx, info);
+             handled = _main_element.text(ctx, info);
          },
          *this, _current_bounds
       );
@@ -333,17 +340,37 @@ namespace cycfi { namespace elements
       if (_content.empty() || !_is_focus)
          return;
 
-      _main_element.begin_focus();
+      _main_element.begin_focus(element::focus_request::restore_previous);
       refresh();
    }
 
    void view::end_focus()
    {
-      if (_content.empty() || _is_focus)
+      if (_content.empty())
          return;
 
       _main_element.end_focus();
       refresh();
+   }
+
+   void view::relinquish_focus()
+   {
+      if (_content.focus_index() != -1)
+      {
+         with_context_do(
+            [this](auto const& ctx, auto& /*_main_element*/)
+            {
+               ctx.element->in_context_do(ctx, _content,
+                  [this](auto const& ctx)
+                  {
+                     elements::relinquish_focus(_content, ctx);
+                  }
+               );
+            },
+            *this, _current_bounds
+         );
+      }
+      _is_focus = false;
    }
 
    void view::track_drop(drop_info const& info, cursor_tracking status)
@@ -351,7 +378,7 @@ namespace cycfi { namespace elements
       if (_content.empty())
          return;
 
-      call(
+      with_context_do(
          [info, status](auto const& ctx, auto& _main_element)
          {
             _main_element.track_drop(ctx, info, status);
@@ -366,7 +393,7 @@ namespace cycfi { namespace elements
          return false;
 
       bool handled = false;
-      call(
+      with_context_do(
          [info, &handled](auto const& ctx, auto& _main_element)
          {
             handled = _main_element.drop(ctx, info);
@@ -410,4 +437,18 @@ namespace cycfi { namespace elements
       if (state == tracking::end_tracking)
          _tracking.erase(&e);
    }
-}}
+
+   void view::in_context_do(element& e, context_function f)
+   {
+      if (_content.empty())
+         return;
+
+      with_context_do(
+         [&e, &f](auto const& ctx, auto& _main_element)
+         {
+            _main_element.in_context_do(ctx, e, f);
+         },
+         *this, _current_bounds
+      );
+   }
+}

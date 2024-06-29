@@ -7,7 +7,6 @@
 #include <sstream>
 
 using namespace cycfi::elements;
-using namespace cycfi::artist;
 
 // Main window background color
 auto constexpr bkd_color = rgba(35, 35, 37, 255);
@@ -93,7 +92,7 @@ auto make_xy_thumbwheel()
 
 int main(int argc, char* argv[])
 {
-   app _app(argc, argv, "Thumbwheels", "com.cycfi.thumbwheels");
+   app _app("Thumbwheels");
    window _win(_app.name());
    _win.on_close = [&_app]() { _app.stop(); };
 

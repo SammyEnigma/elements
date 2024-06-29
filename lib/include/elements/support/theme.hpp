@@ -8,12 +8,9 @@
 
 #include <elements/support.hpp>
 
-namespace cycfi { namespace elements
+namespace cycfi::elements
 {
    enum class dial_mode_enum : int;
-   using artist::color;
-   using artist::font_descr;
-   using artist::extent;
 
    class theme
    {
@@ -36,6 +33,7 @@ namespace cycfi { namespace elements
       color                slide_button_on_color;
       color                slide_button_base_color;
       color                slide_button_thumb_color;
+      color                active_tab_color;
 
       color                controls_color;
       float                controls_frame_stroke_width;
@@ -70,6 +68,8 @@ namespace cycfi { namespace elements
       float                text_box_caret_width;
       color                inactive_font_color;
       std::size_t          input_box_text_limit;
+
+      font_descr           mono_spaced_font;
 
       color                ticks_color;
       float                major_ticks_level;
@@ -155,6 +155,6 @@ namespace cycfi { namespace elements
          global_theme::_theme(), pmem, val
       };
    }
-}}
+}
 
 #endif

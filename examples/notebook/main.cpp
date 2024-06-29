@@ -6,7 +6,6 @@
 #include <elements.hpp>
 
 using namespace cycfi::elements;
-using namespace cycfi::artist;
 
 // Main window background color
 auto constexpr bkd_color = rgba(35, 35, 37, 255);
@@ -37,7 +36,7 @@ auto make_tabs(view& view_)
 
 int main(int argc, char* argv[])
 {
-   app _app(argc, argv, "Notebook", "com.cycfi.notebook");
+   app _app("Notebook");
    window _win(_app.name());
    _win.on_close = [&_app]() { _app.stop(); };
 
